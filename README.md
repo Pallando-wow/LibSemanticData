@@ -134,7 +134,7 @@ See `SPECIFICATION.md`.
 
 ## Status
 
-The first complete `LibBrokerData-1.0` core implementation is available as implementation revision `MINOR = 4`.
+The first complete `LibBrokerData-1.0` core implementation is available as implementation revision `MINOR = 5`.
 
 The current implementation covers:
 
@@ -147,9 +147,16 @@ The current implementation covers:
 - snapshot semantics
 - compatible embedded-library upgrades and downgrade protection
 
-The current core passed **165/165 automated in-game tests**. See `TEST_STATUS.md`.
+The current core passed **220/220 automated in-game tests**. See `TEST_STATUS.md`.
 
-The API is still considered a pre-release candidate until the implementation/specification audit and first consumer integration are complete.
+The implementation/specification audit is complete. The API remains a pre-release candidate until the first real Producer/Consumer integration is complete.
+
+The MINOR-5 audit revision fixes two edge cases found during final review:
+
+- Boolean change events preserve `oldValue = false` correctly instead of treating it as unavailable.
+- Entity identity keeps numeric IDs type-safe and collision-free instead of deriving identity only from `tostring(entityID)`.
+
+Entity metadata and `progress` payloads are also validated against the defined 1.0 structure.
 
 ## License
 

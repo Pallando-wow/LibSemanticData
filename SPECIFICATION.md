@@ -1,6 +1,6 @@
 # LibBrokerData-1.0 Specification
 
-**Status:** Draft 0.6 – implementation candidate
+**Status:** Draft 0.7 – implementation candidate
 **Library ID:** `LibBrokerData-1.0`
 **Repository:** `LibBrokerData`
 
@@ -133,7 +133,7 @@ lib.MINOR = 1
 The first complete core implementation described by this draft uses:
 
 ```lua
-lib.MINOR = 4
+lib.MINOR = 5
 ```
 
 `MINOR` is an implementation revision, not part of the public API identity.
@@ -359,6 +359,8 @@ Example:
 }
 ```
 
+For LibBrokerData-1.0, the defined Entity keys are `entityType`, `entityID`, and optional `entityLabel`. Additional Entity keys are rejected as `INVALID_ENTITY`.
+
 Recommended Entity types may include:
 
 ```text
@@ -386,6 +388,8 @@ For LibBrokerData-1.0, `entityID` may be:
 - a finite number
 
 The Lua type is part of the identity. Therefore numeric `1` and string `"1"` are distinct Entity IDs.
+
+Implementations must preserve the typed Entity ID strongly enough to avoid collisions. Numeric Entity identity must not derive uniqueness solely from `tostring(entityID)`.
 
 `entityID` should be as stable as the source addon can reasonably provide.
 
@@ -560,6 +564,14 @@ Optionally:
     maximum = 100,
 }
 ```
+
+For LibBrokerData-1.0, the defined `progress` keys are exactly:
+
+- `current`
+- `maximum`
+- optional `minimum`
+
+Additional keys are rejected as `INVALID_VALUE`.
 
 Progress tables are logical immutable value snapshots.
 
@@ -1102,6 +1114,29 @@ changes = {
     },
 }
 ```
+
+Boolean `false` is a valid Value and is distinct from `nil`.
+
+For example, a change from:
+
+```lua
+false
+```
+
+to:
+
+```lua
+true
+```
+
+must report:
+
+```lua
+oldValue = false
+newValue = true
+```
+
+It must not report `oldValue = nil`.
 
 For an Entity metadata-only change:
 
@@ -1658,42 +1693,21 @@ Only the runtime library directory needs to be embedded into normal addons.
 
 ## 33. 1.0 specification status
 
-Draft 0.6 is the implementation-candidate specification for the first complete `LibBrokerData-1.0` core.
+Draft 0.7 is the audited implementation-candidate specification for `LibBrokerData-1.0`.
 
 The current implementation revision is:
 
 ```text
-MINOR = 4
+MINOR = 5
 ```
 
-The implementation covers:
+The MINOR-5 implementation passed **220/220 automated in-game tests** using `LibBrokerDataTest 0.2.1`.
 
-- Provider and Field identity
-- read-only Provider and Field metadata discovery
-- Field scope
-- Entity identity and metadata
-- semantic value types
-- `SetValue()` semantics
-- atomic `SetValues()` input and behavior
-- public return signatures
-- iterator signatures and ordering behavior
-- callback registration and removal
-- `EVENT_PROVIDER_REGISTERED`
-- `EVENT_FIELD_REGISTERED`
-- `EVENT_VALUES_CHANGED`
-- Entity and table-valued Value snapshot semantics
-- `GetValue()` scope validation
-- duplicate registration behavior
-- conflict handling
-- embedded MINOR upgrade behavior
-- downgrade protection
-- independence from UI, Consumers, and LibDataBroker
+The expanded suite covers Provider/Field discovery, typed Values, `single` and `entity` scopes, atomic batches, callbacks and events, snapshot semantics, ordering, typed Entity identity, large numeric Entity IDs, Boolean `false` change snapshots, strict 1.0 payload validation, MINOR upgrades, migration of existing Entity Values, and downgrade protection.
 
-The MINOR-4 implementation passed **165/165 automated in-game tests**, including an upgrade path from the earlier MINOR-3 implementation and a subsequent downgrade attempt.
+No structural API mismatch is currently known from the implementation/specification audit.
 
-No structural API mismatch is currently known from the implementation/specification review.
-
-The public 1.0 API should remain pre-release until at least the first real Producer/Consumer integration has been completed and any findings from that integration have been resolved.
+The public 1.0 API remains pre-release until the first real Producer/Consumer integration has been completed and any findings from that integration have been resolved.
 
 ---
 

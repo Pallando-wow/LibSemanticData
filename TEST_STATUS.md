@@ -3,9 +3,9 @@
 ## Current tested core
 
 - Library: `LibBrokerData-1.0`
-- Implementation revision: `MINOR = 4`
-- Test addon: `LibBrokerDataTest 0.1.0`
-- Result: **165/165 tests passed**
+- Implementation revision: `MINOR = 5`
+- Test addon: `LibBrokerDataTest 0.2.1`
+- Result: **220/220 tests passed**
 - Test type: automated in-game test
 - WoW client/flavor: not recorded in this test result
 
@@ -20,6 +20,14 @@ The automated test suite covered:
 - preservation of Field object identity
 - preservation of a pre-existing callback registration
 - downgrade protection after MINOR 4 is active
+- MINOR-4 → MINOR-5 Entity-store migration
+- preservation of existing Entity Values and ordering during migration
+- Boolean `false` → `true` callbacks with `oldValue = false`
+- large numeric Entity IDs
+- distinction between numeric and string Entity IDs
+- collision-safe typed Entity identity
+- strict Entity payload validation
+- strict `progress` payload validation
 - Provider registration, lookup, iteration and duplicate registration
 - Provider metadata and read-only behavior
 - Field registration, lookup, iteration and duplicate registration
@@ -48,11 +56,20 @@ The automated test suite covered:
 
 ## Result
 
-The tested MINOR-4 core completed the suite without a reported failure:
+The tested MINOR-5 core completed the suite without a reported failure:
 
 ```text
-LibBrokerDataTest: 165/165 tests passed
+LibBrokerDataTest: 220/220 tests passed
 ```
+
+## Audit findings resolved in MINOR 5
+
+The final audit found two edge cases that were not covered by the earlier 165-test suite:
+
+1. a previous Boolean Value of `false` could be represented as `nil` in a Values-changed callback
+2. textual conversion of numeric Entity IDs could allow identity collisions for sufficiently large numbers
+
+Both were corrected in MINOR 5. The expanded `LibBrokerDataTest 0.2.1` suite then passed **220/220 tests**.
 
 ## Before declaring the 1.0 API stable
 
