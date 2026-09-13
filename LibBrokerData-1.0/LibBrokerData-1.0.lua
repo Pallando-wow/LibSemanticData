@@ -1,5 +1,5 @@
 local MAJOR = "LibBrokerData-1.0"
-local MINOR = 3
+local MINOR = 4
 
 local existing = _G[MAJOR]
 
@@ -23,72 +23,172 @@ if type(state) ~= "table" then
     lib._state = state
 end
 
-if type(state.providers) ~= "table" then
-    state.providers = {}
+local function ensureTable(parent, key)
+    if type(parent[key]) ~= "table" then
+        parent[key] = {}
+    end
+
+    return parent[key]
 end
 
-if type(state.providerInfo) ~= "table" then
-    state.providerInfo = {}
-end
+local providers = ensureTable(state, "providers")
+local providerInfo = ensureTable(state, "providerInfo")
+local providerOrder = ensureTable(state, "providerOrder")
+local fields = ensureTable(state, "fields")
+local fieldInfo = ensureTable(state, "fieldInfo")
+local fieldOrder = ensureTable(state, "fieldOrder")
+local values = ensureTable(state, "values")
+local callbacks = ensureTable(state, "callbacks")
+local callbackTokens = ensureTable(state, "callbackTokens")
 
-if type(state.providerOrder) ~= "table" then
-    state.providerOrder = {}
-end
-
-if type(state.fields) ~= "table" then
-    state.fields = {}
-end
-
-if type(state.fieldInfo) ~= "table" then
-    state.fieldInfo = {}
-end
-
-if type(state.fieldOrder) ~= "table" then
-    state.fieldOrder = {}
-end
-
-if type(state.callbacks) ~= "table" then
-    state.callbacks = {}
-end
-
-if type(state.callbackTokens) ~= "table" then
-    state.callbackTokens = {}
-end
-
-if type(state.nextCallbackToken) ~= "number" then
+if type(state.nextCallbackToken) ~= "number" or state.nextCallbackToken < 1 then
     state.nextCallbackToken = 1
 end
 
-local providerMethods = lib._providerMethods
-
-if type(providerMethods) ~= "table" then
-    providerMethods = {}
-    lib._providerMethods = providerMethods
+local function isFiniteNumber(value)
+    return type(value) == "number"
+        and value == value
+        and value ~= math.huge
+        and value ~= -math.huge
 end
 
-local providerMetatable = lib._providerMetatable
+local function cloneValue(value, seen)
+    if type(value) ~= "table" then
+        return value
+    end
 
-if type(providerMetatable) ~= "table" then
-    providerMetatable = { __index = providerMethods }
-    lib._providerMetatable = providerMetatable
-else
-    providerMetatable.__index = providerMethods
+    seen = seen or {}
+
+    if seen[value] ~= nil then
+        return seen[value]
+    end
+
+    local result = {}
+    seen[value] = result
+
+    for key, item in pairs(value) do
+        result[key] = cloneValue(item, seen)
+    end
+
+    return result
 end
 
-local fieldMethods = lib._fieldMethods
+local function deepEqual(left, right, seen)
+    if left == right then
+        return true
+    end
 
-if type(fieldMethods) ~= "table" then
-    fieldMethods = {}
-    lib._fieldMethods = fieldMethods
+    if type(left) ~= type(right) then
+        return false
+    end
+
+    if type(left) ~= "table" then
+        return false
+    end
+
+    seen = seen or {}
+    local rightSeen = seen[left]
+
+    if rightSeen ~= nil and rightSeen[right] then
+        return true
+    end
+
+    if rightSeen == nil then
+        rightSeen = {}
+        seen[left] = rightSeen
+    end
+
+    rightSeen[right] = true
+
+    for key, value in pairs(left) do
+        if not deepEqual(value, right[key], seen) then
+            return false
+        end
+    end
+
+    for key in pairs(right) do
+        if left[key] == nil then
+            return false
+        end
+    end
+
+    return true
 end
 
-local fieldMetatable = lib._fieldMetatable
+local function isSnapshotSafe(value, seen)
+    local valueType = type(value)
 
-if type(fieldMetatable) ~= "table" then
-    fieldMetatable = { __index = fieldMethods }
-    lib._fieldMetatable = fieldMetatable
-else
-    fieldMetatable.__index = fieldMethods
+    if valueType == "nil" or valueType == "string" or valueType == "boolean" then
+        return true
+    end
+
+    if valueType == "number" then
+        return isFiniteNumber(value)
+    end
+
+    if valueType ~= "table" then
+        return false
+    end
+
+    seen = seen or {}
+
+    if seen[value] then
+        return true
+    end
+
+    seen[value] = true
+
+    for key, item in pairs(value) do
+        local keyType = type(key)
+
+        if keyType ~= "string" and keyType ~= "number" and keyType ~= "boolean" then
+            return false
+        end
+
+        if keyType == "number" and not isFiniteNumber(key) then
+            return false
+        end
+
+        if not isSnapshotSafe(item, seen) then
+            return false
+        end
+    end
+
+    return true
+end
+
+local function isValidTechnicalID(value)
+    return type(value) == "string"
+        and value ~= ""
+        and value:match("^[A-Za-z0-9_%.:%-]+$") ~= nil
+end
+
+local function isValidProviderID(providerID)
+    return isValidTechnicalID(providerID)
+end
+
+local function isValidFieldID(fieldID)
+    return isValidTechnicalID(fieldID)
+end
+
+local function isValidEntityType(entityType)
+    return isValidTechnicalID(entityType)
+end
+
+local function isValidEntityID(entityID)
+    if type(entityID) == "string" then
+        return entityID ~= ""
+    end
+
+    return isFiniteNumber(entityID)
+end
+
+local function makeEntityKey(entityType, entityID)
+    return entityType
+        .. "\031"
+        .. type(entityID)
+        .. "\031"
+        .. tostring(entityID)
 end
 
 local fieldTypes = {
@@ -103,64 +203,36 @@ local fieldTypes = {
     progress = true,
 }
 
-local function isValidProviderID(providerID)
-    return type(providerID) == "string"
-        and providerID ~= ""
-        and providerID:match("^[A-Za-z0-9_%.:%-]+$") ~= nil
-end
-
-local function isValidFieldID(fieldID)
-    return type(fieldID) == "string"
-        and fieldID ~= ""
-        and fieldID:match("^[A-Za-z0-9_%.:%-]+$") ~= nil
-end
-
-local function isValidEntityType(entityType)
-    return type(entityType) == "string"
-        and entityType ~= ""
-        and entityType:match("^[A-Za-z0-9_%.:%-]+$") ~= nil
-end
-
-local function copyTable(source)
-    local result = {}
-
-    for key, value in pairs(source) do
-        result[key] = value
-    end
-
-    return result
-end
-
 local function validateProviderInfo(info)
     if type(info) ~= "table" then
-        return nil, "PROVIDER_CONFLICT"
+        return nil, "INVALID_VALUE"
     end
 
     if type(info.label) ~= "string" or info.label == "" then
-        return nil, "PROVIDER_CONFLICT"
+        return nil, "INVALID_VALUE"
     end
 
     if info.description ~= nil and type(info.description) ~= "string" then
-        return nil, "PROVIDER_CONFLICT"
+        return nil, "INVALID_VALUE"
     end
 
     if info.addon ~= nil and type(info.addon) ~= "string" then
-        return nil, "PROVIDER_CONFLICT"
+        return nil, "INVALID_VALUE"
     end
 
     return true
 end
 
-local function isCompatibleProviderInfo(existingInfo, newInfo)
-    if existingInfo.label ~= newInfo.label then
+local function isCompatibleProviderInfo(current, incoming)
+    if current.label ~= incoming.label then
         return false
     end
 
-    if newInfo.description ~= nil and existingInfo.description ~= newInfo.description then
+    if incoming.description ~= nil and current.description ~= incoming.description then
         return false
     end
 
-    if newInfo.addon ~= nil and existingInfo.addon ~= newInfo.addon then
+    if incoming.addon ~= nil and current.addon ~= incoming.addon then
         return false
     end
 
@@ -176,7 +248,7 @@ local function validateFieldInfo(info)
         return nil, "INVALID_VALUE"
     end
 
-    if type(info.type) ~= "string" or fieldTypes[info.type] ~= true then
+    if type(info.type) ~= "string" or not fieldTypes[info.type] then
         return nil, "INVALID_FIELD_TYPE"
     end
 
@@ -211,15 +283,15 @@ local function validateFieldInfo(info)
     return true
 end
 
-local function isCompatibleFieldInfo(existingInfo, newInfo)
-    if existingInfo.label ~= newInfo.label
-        or existingInfo.type ~= newInfo.type
-        or existingInfo.scope ~= newInfo.scope
+local function isCompatibleFieldInfo(current, incoming)
+    if current.label ~= incoming.label
+        or current.type ~= incoming.type
+        or current.scope ~= incoming.scope
     then
         return false
     end
 
-    if existingInfo.scope == "entity" and existingInfo.entityType ~= newInfo.entityType then
+    if current.scope == "entity" and current.entityType ~= incoming.entityType then
         return false
     end
 
@@ -233,7 +305,7 @@ local function isCompatibleFieldInfo(existingInfo, newInfo)
     for index = 1, #optionalKeys do
         local key = optionalKeys[index]
 
-        if newInfo[key] ~= nil and existingInfo[key] ~= newInfo[key] then
+        if incoming[key] ~= nil and current[key] ~= incoming[key] then
             return false
         end
     end
@@ -241,39 +313,705 @@ local function isCompatibleFieldInfo(existingInfo, newInfo)
     return true
 end
 
+local function validateEntity(entity, expectedEntityType)
+    if entity == nil then
+        return nil, "ENTITY_REQUIRED"
+    end
+
+    if type(entity) ~= "table" then
+        return nil, "INVALID_ENTITY"
+    end
+
+    if not isValidEntityType(entity.entityType)
+        or not isValidEntityID(entity.entityID)
+    then
+        return nil, "INVALID_ENTITY"
+    end
+
+    if entity.entityType ~= expectedEntityType then
+        return nil, "ENTITY_TYPE_MISMATCH"
+    end
+
+    if entity.entityLabel ~= nil and type(entity.entityLabel) ~= "string" then
+        return nil, "INVALID_ENTITY"
+    end
+
+    for key, value in pairs(entity) do
+        if type(key) ~= "string" or not isSnapshotSafe(value) then
+            return nil, "INVALID_ENTITY"
+        end
+    end
+
+    return cloneValue(entity), nil
+end
+
+local function validateValue(info, value)
+    if value == nil then
+        return true
+    end
+
+    if info.type == "text" then
+        return type(value) == "string"
+    end
+
+    if info.type == "number"
+        or info.type == "percent"
+        or info.type == "duration"
+    then
+        return isFiniteNumber(value)
+    end
+
+    if info.type == "integer" or info.type == "money" then
+        return isFiniteNumber(value) and value == math.floor(value)
+    end
+
+    if info.type == "boolean" then
+        return type(value) == "boolean"
+    end
+
+    if info.type == "status" then
+        return type(value) == "string"
+    end
+
+    if info.type == "progress" then
+        if type(value) ~= "table"
+            or not isFiniteNumber(value.current)
+            or not isFiniteNumber(value.maximum)
+            or (value.minimum ~= nil and not isFiniteNumber(value.minimum))
+        then
+            return false
+        end
+
+        return isSnapshotSafe(value)
+    end
+
+    return false
+end
+
+local function emptyIterator()
+    return nil
+end
+
+lib.EVENT_PROVIDER_REGISTERED = "LibBrokerData_ProviderRegistered"
+lib.EVENT_FIELD_REGISTERED = "LibBrokerData_FieldRegistered"
+lib.EVENT_VALUES_CHANGED = "LibBrokerData_ValuesChanged"
+
+local supportedEvents = {
+    [lib.EVENT_PROVIDER_REGISTERED] = true,
+    [lib.EVENT_FIELD_REGISTERED] = true,
+    [lib.EVENT_VALUES_CHANGED] = true,
+}
+
+for event in pairs(supportedEvents) do
+    if type(callbacks[event]) ~= "table" then
+        callbacks[event] = {}
+    end
+end
+
+local unpackValues = unpack or table.unpack
+
+local function errorHandler(errorValue)
+    if type(_G.geterrorhandler) == "function" then
+        local handler = _G.geterrorhandler()
+
+        if type(handler) == "function" then
+            return handler(errorValue)
+        end
+    end
+
+    return errorValue
+end
+
+local function fireEvent(event, ...)
+    local registered = callbacks[event]
+
+    if type(registered) ~= "table" or #registered == 0 then
+        return
+    end
+
+    local tokens = {}
+
+    for index = 1, #registered do
+        tokens[index] = registered[index]
+    end
+
+    local arguments = {
+        n = select("#", ...),
+        ...,
+    }
+
+    for index = 1, #tokens do
+        local record = callbackTokens[tokens[index]]
+
+        if record ~= nil and record.event == event then
+            xpcall(function()
+                record.callback(unpackValues(arguments, 1, arguments.n))
+            end, errorHandler)
+        end
+    end
+end
+
+local providerMethods = lib._providerMethods
+
+if type(providerMethods) ~= "table" then
+    providerMethods = {}
+    lib._providerMethods = providerMethods
+else
+    for key in pairs(providerMethods) do
+        providerMethods[key] = nil
+    end
+end
+
+local fieldMethods = lib._fieldMethods
+
+if type(fieldMethods) ~= "table" then
+    fieldMethods = {}
+    lib._fieldMethods = fieldMethods
+else
+    for key in pairs(fieldMethods) do
+        fieldMethods[key] = nil
+    end
+end
+
+local providerObjectIDs = {}
+local fieldObjectInfo = {}
+
+state.providerObjectIDs = providerObjectIDs
+state.fieldObjectInfo = fieldObjectInfo
+
+local providerMetatable = lib._providerMetatable
+
+if type(providerMetatable) ~= "table" then
+    providerMetatable = {}
+    lib._providerMetatable = providerMetatable
+end
+
+local fieldMetatable = lib._fieldMetatable
+
+if type(fieldMetatable) ~= "table" then
+    fieldMetatable = {}
+    lib._fieldMetatable = fieldMetatable
+end
+
+providerMetatable.__index = function(provider, key)
+    local method = providerMethods[key]
+
+    if method ~= nil then
+        return method
+    end
+
+    local providerID = providerObjectIDs[provider]
+    local info = providerID and providerInfo[providerID] or nil
+
+    if info == nil then
+        return nil
+    end
+
+    local value = info[key]
+
+    if type(value) == "table" then
+        return cloneValue(value)
+    end
+
+    return value
+end
+
+providerMetatable.__newindex = function()
+    error(MAJOR .. " provider objects are read-only", 2)
+end
+
+fieldMetatable.__index = function(field, key)
+    local method = fieldMethods[key]
+
+    if method ~= nil then
+        return method
+    end
+
+    local identity = fieldObjectInfo[field]
+
+    if identity == nil then
+        return nil
+    end
+
+    local info = fieldInfo[identity.providerID]
+        and fieldInfo[identity.providerID][identity.fieldID]
+        or nil
+
+    if info == nil then
+        return nil
+    end
+
+    local value = info[key]
+
+    if type(value) == "table" then
+        return cloneValue(value)
+    end
+
+    return value
+end
+
+fieldMetatable.__newindex = function()
+    error(MAJOR .. " field objects are read-only", 2)
+end
+
+local function clearObject(object)
+    for key in pairs(object) do
+        rawset(object, key, nil)
+    end
+end
+
+local function ensureValueStore(providerID, fieldID, info)
+    if type(values[providerID]) ~= "table" then
+        values[providerID] = {}
+    end
+
+    local store = values[providerID][fieldID]
+
+    if type(store) == "table" and store.scope == info.scope then
+        if info.scope == "entity" then
+            if type(store.byKey) ~= "table" then
+                store.byKey = {}
+            end
+
+            if type(store.order) ~= "table" then
+                store.order = {}
+            end
+        end
+
+        return store
+    end
+
+    if info.scope == "single" then
+        store = {
+            scope = "single",
+            hasValue = false,
+            value = nil,
+        }
+    else
+        store = {
+            scope = "entity",
+            byKey = {},
+            order = {},
+        }
+    end
+
+    values[providerID][fieldID] = store
+
+    return store
+end
+
+for providerID, provider in pairs(providers) do
+    if type(provider) == "table" then
+        clearObject(provider)
+        setmetatable(provider, providerMetatable)
+        providerObjectIDs[provider] = providerID
+    end
+
+    if type(providerInfo[providerID]) == "table" then
+        providerInfo[providerID] = cloneValue(providerInfo[providerID])
+    end
+
+    if type(fields[providerID]) ~= "table" then
+        fields[providerID] = {}
+    end
+
+    if type(fieldInfo[providerID]) ~= "table" then
+        fieldInfo[providerID] = {}
+    end
+
+    if type(fieldOrder[providerID]) ~= "table" then
+        fieldOrder[providerID] = {}
+    end
+
+    if type(values[providerID]) ~= "table" then
+        values[providerID] = {}
+    end
+
+    for fieldID, field in pairs(fields[providerID]) do
+        if type(field) == "table" then
+            clearObject(field)
+            setmetatable(field, fieldMetatable)
+            fieldObjectInfo[field] = {
+                providerID = providerID,
+                fieldID = fieldID,
+            }
+        end
+
+        local info = fieldInfo[providerID][fieldID]
+
+        if type(info) == "table" then
+            fieldInfo[providerID][fieldID] = cloneValue(info)
+            ensureValueStore(providerID, fieldID, fieldInfo[providerID][fieldID])
+        end
+    end
+end
+
+local function getProviderID(provider)
+    local providerID = providerObjectIDs[provider]
+
+    if providerID == nil or providers[providerID] ~= provider then
+        return nil
+    end
+
+    return providerID
+end
+
+local function getFieldRecord(providerID, fieldID)
+    local providerFields = fields[providerID]
+
+    if type(providerFields) ~= "table" then
+        return nil, nil
+    end
+
+    local field = providerFields[fieldID]
+
+    if field == nil then
+        return nil, nil
+    end
+
+    return field, fieldInfo[providerID][fieldID]
+end
+
+local function removeEntityFromOrder(store, entityKey)
+    for index = 1, #store.order do
+        if store.order[index] == entityKey then
+            table.remove(store.order, index)
+            return
+        end
+    end
+end
+
+local function makePublicValue(value)
+    if type(value) == "table" then
+        return cloneValue(value)
+    end
+
+    return value
+end
+
+local function makePublicEntity(entity)
+    if entity == nil then
+        return nil
+    end
+
+    return cloneValue(entity)
+end
+
+local function makeChange(fieldID, oldValue, newValue, oldEntity, newEntity)
+    return {
+        fieldID = fieldID,
+        oldValue = makePublicValue(oldValue),
+        newValue = makePublicValue(newValue),
+        oldEntity = makePublicEntity(oldEntity),
+        newEntity = makePublicEntity(newEntity),
+    }
+end
+
+local function prepareUpdate(providerID, fieldID, value, entity)
+    if not isValidFieldID(fieldID) then
+        return nil, "INVALID_FIELD_ID"
+    end
+
+    local field, info = getFieldRecord(providerID, fieldID)
+
+    if field == nil then
+        return nil, "UNKNOWN_FIELD"
+    end
+
+    if not validateValue(info, value) then
+        return nil, "INVALID_VALUE"
+    end
+
+    local store = ensureValueStore(providerID, fieldID, info)
+
+    if info.scope == "single" then
+        if entity ~= nil then
+            return nil, "ENTITY_NOT_ALLOWED"
+        end
+
+        if value == nil then
+            if not store.hasValue then
+                return {
+                    changed = false,
+                    fieldID = fieldID,
+                    targetKey = fieldID,
+                }, nil
+            end
+
+            return {
+                changed = true,
+                fieldID = fieldID,
+                targetKey = fieldID,
+                scope = "single",
+                remove = true,
+                change = makeChange(
+                    fieldID,
+                    store.value,
+                    nil,
+                    nil,
+                    nil
+                ),
+            }, nil
+        end
+
+        local newValue = makePublicValue(value)
+
+        if store.hasValue and deepEqual(store.value, newValue) then
+            return {
+                changed = false,
+                fieldID = fieldID,
+                targetKey = fieldID,
+            }, nil
+        end
+
+        return {
+            changed = true,
+            fieldID = fieldID,
+            targetKey = fieldID,
+            scope = "single",
+            remove = false,
+            value = newValue,
+            change = makeChange(
+                fieldID,
+                store.hasValue and store.value or nil,
+                newValue,
+                nil,
+                nil
+            ),
+        }, nil
+    end
+
+    local entitySnapshot, entityError = validateEntity(entity, info.entityType)
+
+    if entitySnapshot == nil then
+        return nil, entityError
+    end
+
+    local entityKey = makeEntityKey(
+        entitySnapshot.entityType,
+        entitySnapshot.entityID
+    )
+
+    local targetKey = fieldID .. "\030" .. entityKey
+    local current = store.byKey[entityKey]
+
+    if value == nil then
+        if current == nil then
+            return {
+                changed = false,
+                fieldID = fieldID,
+                targetKey = targetKey,
+            }, nil
+        end
+
+        return {
+            changed = true,
+            fieldID = fieldID,
+            targetKey = targetKey,
+            scope = "entity",
+            entityKey = entityKey,
+            remove = true,
+            change = makeChange(
+                fieldID,
+                current.value,
+                nil,
+                current.entity,
+                nil
+            ),
+        }, nil
+    end
+
+    local newValue = makePublicValue(value)
+
+    if current ~= nil
+        and deepEqual(current.value, newValue)
+        and deepEqual(current.entity, entitySnapshot)
+    then
+        return {
+            changed = false,
+            fieldID = fieldID,
+            targetKey = targetKey,
+        }, nil
+    end
+
+    return {
+        changed = true,
+        fieldID = fieldID,
+        targetKey = targetKey,
+        scope = "entity",
+        entityKey = entityKey,
+        remove = false,
+        value = newValue,
+        entity = entitySnapshot,
+        isNewEntity = current == nil,
+        change = makeChange(
+            fieldID,
+            current and current.value or nil,
+            newValue,
+            current and current.entity or nil,
+            entitySnapshot
+        ),
+    }, nil
+end
+
+local function applyPreparedUpdate(providerID, action)
+    if not action.changed then
+        return
+    end
+
+    local info = fieldInfo[providerID][action.fieldID]
+    local store = ensureValueStore(providerID, action.fieldID, info)
+
+    if action.scope == "single" then
+        if action.remove then
+            store.hasValue = false
+            store.value = nil
+        else
+            store.hasValue = true
+            store.value = makePublicValue(action.value)
+        end
+
+        return
+    end
+
+    if action.remove then
+        store.byKey[action.entityKey] = nil
+        removeEntityFromOrder(store, action.entityKey)
+        return
+    end
+
+    store.byKey[action.entityKey] = {
+        value = makePublicValue(action.value),
+        entity = makePublicEntity(action.entity),
+    }
+
+    if action.isNewEntity then
+        store.order[#store.order + 1] = action.entityKey
+    end
+end
+
+local function strictArrayLength(value)
+    if type(value) ~= "table" then
+        return nil
+    end
+
+    local count = 0
+    local highest = 0
+
+    for key in pairs(value) do
+        if type(key) ~= "number"
+            or key < 1
+            or key ~= math.floor(key)
+        then
+            return nil
+        end
+
+        count = count + 1
+
+        if key > highest then
+            highest = key
+        end
+    end
+
+    if highest ~= count then
+        return nil
+    end
+
+    return count
+end
+
+function lib:RegisterCallback(event, callback)
+    if not supportedEvents[event] then
+        return nil, "INVALID_EVENT"
+    end
+
+    if type(callback) ~= "function" then
+        return nil, "INVALID_CALLBACK"
+    end
+
+    local token = state.nextCallbackToken
+    state.nextCallbackToken = token + 1
+
+    callbackTokens[token] = {
+        event = event,
+        callback = callback,
+    }
+
+    local registered = callbacks[event]
+    registered[#registered + 1] = token
+
+    return token, nil
+end
+
+function lib:UnregisterCallback(token)
+    if type(token) ~= "number"
+        or token < 1
+        or token ~= math.floor(token)
+    then
+        return nil, "INVALID_CALLBACK_TOKEN"
+    end
+
+    local record = callbackTokens[token]
+
+    if record == nil then
+        return false, nil
+    end
+
+    callbackTokens[token] = nil
+
+    local registered = callbacks[record.event]
+
+    if type(registered) == "table" then
+        for index = 1, #registered do
+            if registered[index] == token then
+                table.remove(registered, index)
+                break
+            end
+        end
+    end
+
+    return true, nil
+end
+
 function lib:RegisterProvider(providerID, info)
     if not isValidProviderID(providerID) then
         return nil, "INVALID_PROVIDER_ID"
     end
 
-    local valid, err = validateProviderInfo(info)
+    local valid, validationError = validateProviderInfo(info)
 
     if not valid then
-        return nil, err
+        return nil, validationError
     end
 
-    local provider = state.providers[providerID]
+    local provider = providers[providerID]
 
     if provider ~= nil then
-        local existingInfo = state.providerInfo[providerID]
+        local current = providerInfo[providerID]
 
-        if not isCompatibleProviderInfo(existingInfo, info) then
+        if not isCompatibleProviderInfo(current, info) then
             return nil, "PROVIDER_CONFLICT"
         end
 
         return provider, nil
     end
 
-    provider = setmetatable({
-        _lbdProviderID = providerID,
-    }, providerMetatable)
+    provider = setmetatable({}, providerMetatable)
 
-    state.providers[providerID] = provider
-    state.providerInfo[providerID] = copyTable(info)
-    state.providerOrder[#state.providerOrder + 1] = providerID
-    state.fields[providerID] = {}
-    state.fieldInfo[providerID] = {}
-    state.fieldOrder[providerID] = {}
+    providers[providerID] = provider
+    providerInfo[providerID] = cloneValue(info)
+    providerOrder[#providerOrder + 1] = providerID
+    fields[providerID] = {}
+    fieldInfo[providerID] = {}
+    fieldOrder[providerID] = {}
+    values[providerID] = {}
+    providerObjectIDs[provider] = providerID
+
+    fireEvent(
+        lib.EVENT_PROVIDER_REGISTERED,
+        providerID,
+        provider
+    )
 
     return provider, nil
 end
@@ -283,7 +1021,7 @@ function lib:GetProvider(providerID)
         return nil, "INVALID_PROVIDER_ID"
     end
 
-    local provider = state.providers[providerID]
+    local provider = providers[providerID]
 
     if provider == nil then
         return nil, "UNKNOWN_PROVIDER"
@@ -298,20 +1036,20 @@ function lib:IterateProviders()
     return function()
         index = index + 1
 
-        local providerID = state.providerOrder[index]
+        local providerID = providerOrder[index]
 
         if providerID == nil then
             return nil
         end
 
-        return providerID, state.providers[providerID]
+        return providerID, providers[providerID]
     end
 end
 
 function providerMethods:RegisterField(fieldID, info)
-    local providerID = self._lbdProviderID
+    local providerID = getProviderID(self)
 
-    if state.providers[providerID] ~= self then
+    if providerID == nil then
         return nil, "UNKNOWN_PROVIDER"
     end
 
@@ -319,35 +1057,45 @@ function providerMethods:RegisterField(fieldID, info)
         return nil, "INVALID_FIELD_ID"
     end
 
-    local valid, err = validateFieldInfo(info)
+    local valid, validationError = validateFieldInfo(info)
 
     if not valid then
-        return nil, err
+        return nil, validationError
     end
 
-    local fields = state.fields[providerID]
-    local fieldInfo = state.fieldInfo[providerID]
-    local fieldOrder = state.fieldOrder[providerID]
-    local field = fields[fieldID]
+    local providerFields = fields[providerID]
+    local providerFieldInfo = fieldInfo[providerID]
+    local providerFieldOrder = fieldOrder[providerID]
+    local field = providerFields[fieldID]
 
     if field ~= nil then
-        local existingInfo = fieldInfo[fieldID]
+        local current = providerFieldInfo[fieldID]
 
-        if not isCompatibleFieldInfo(existingInfo, info) then
+        if not isCompatibleFieldInfo(current, info) then
             return nil, "FIELD_CONFLICT"
         end
 
         return field, nil
     end
 
-    field = setmetatable({
-        _lbdProviderID = providerID,
-        _lbdFieldID = fieldID,
-    }, fieldMetatable)
+    field = setmetatable({}, fieldMetatable)
 
-    fields[fieldID] = field
-    fieldInfo[fieldID] = copyTable(info)
-    fieldOrder[#fieldOrder + 1] = fieldID
+    providerFields[fieldID] = field
+    providerFieldInfo[fieldID] = cloneValue(info)
+    providerFieldOrder[#providerFieldOrder + 1] = fieldID
+    fieldObjectInfo[field] = {
+        providerID = providerID,
+        fieldID = fieldID,
+    }
+
+    ensureValueStore(providerID, fieldID, providerFieldInfo[fieldID])
+
+    fireEvent(
+        lib.EVENT_FIELD_REGISTERED,
+        providerID,
+        fieldID,
+        field
+    )
 
     return field, nil
 end
@@ -357,7 +1105,7 @@ function lib:GetField(providerID, fieldID)
         return nil, "INVALID_PROVIDER_ID"
     end
 
-    if state.providers[providerID] == nil then
+    if providers[providerID] == nil then
         return nil, "UNKNOWN_PROVIDER"
     end
 
@@ -365,8 +1113,9 @@ function lib:GetField(providerID, fieldID)
         return nil, "INVALID_FIELD_ID"
     end
 
-    local fields = state.fields[providerID]
-    local field = fields and fields[fieldID] or nil
+    local field = fields[providerID]
+        and fields[providerID][fieldID]
+        or nil
 
     if field == nil then
         return nil, "UNKNOWN_FIELD"
@@ -376,14 +1125,14 @@ function lib:GetField(providerID, fieldID)
 end
 
 function lib:IterateFields(providerID)
-    if not isValidProviderID(providerID) or state.providers[providerID] == nil then
-        return function()
-            return nil
-        end
+    if not isValidProviderID(providerID)
+        or providers[providerID] == nil
+    then
+        return emptyIterator
     end
 
-    local order = state.fieldOrder[providerID]
-    local fields = state.fields[providerID]
+    local order = fieldOrder[providerID]
+    local providerFields = fields[providerID]
     local index = 0
 
     return function()
@@ -395,7 +1144,215 @@ function lib:IterateFields(providerID)
             return nil
         end
 
-        return fieldID, fields[fieldID]
+        return fieldID, providerFields[fieldID]
+    end
+end
+
+function providerMethods:SetValue(fieldID, value, entity)
+    local providerID = getProviderID(self)
+
+    if providerID == nil then
+        return nil, "UNKNOWN_PROVIDER"
+    end
+
+    local action, preparationError = prepareUpdate(
+        providerID,
+        fieldID,
+        value,
+        entity
+    )
+
+    if action == nil then
+        return nil, preparationError
+    end
+
+    if not action.changed then
+        return false, nil
+    end
+
+    applyPreparedUpdate(providerID, action)
+
+    fireEvent(
+        lib.EVENT_VALUES_CHANGED,
+        providerID,
+        { action.change }
+    )
+
+    return true, nil
+end
+
+function providerMethods:SetValues(updates)
+    local providerID = getProviderID(self)
+
+    if providerID == nil then
+        return nil, "UNKNOWN_PROVIDER"
+    end
+
+    local count = strictArrayLength(updates)
+
+    if count == nil then
+        return nil, "INVALID_VALUE"
+    end
+
+    local actions = {}
+    local seenTargets = {}
+
+    for index = 1, count do
+        local update = updates[index]
+
+        if type(update) ~= "table" then
+            return nil, "INVALID_VALUE"
+        end
+
+        local action, preparationError = prepareUpdate(
+            providerID,
+            update.fieldID,
+            update.value,
+            update.entity
+        )
+
+        if action == nil then
+            return nil, preparationError
+        end
+
+        if seenTargets[action.targetKey] then
+            return nil, "DUPLICATE_UPDATE"
+        end
+
+        seenTargets[action.targetKey] = true
+        actions[#actions + 1] = action
+    end
+
+    local changes = {}
+
+    for index = 1, #actions do
+        local action = actions[index]
+
+        if action.changed then
+            applyPreparedUpdate(providerID, action)
+            changes[#changes + 1] = action.change
+        end
+    end
+
+    if #changes > 0 then
+        fireEvent(
+            lib.EVENT_VALUES_CHANGED,
+            providerID,
+            changes
+        )
+    end
+
+    return #changes, nil
+end
+
+function lib:GetValue(providerID, fieldID, entityType, entityID)
+    if not isValidProviderID(providerID) then
+        return nil, nil, "INVALID_PROVIDER_ID"
+    end
+
+    if providers[providerID] == nil then
+        return nil, nil, "UNKNOWN_PROVIDER"
+    end
+
+    if not isValidFieldID(fieldID) then
+        return nil, nil, "INVALID_FIELD_ID"
+    end
+
+    local field, info = getFieldRecord(providerID, fieldID)
+
+    if field == nil then
+        return nil, nil, "UNKNOWN_FIELD"
+    end
+
+    local store = ensureValueStore(providerID, fieldID, info)
+
+    if info.scope == "single" then
+        if entityType ~= nil or entityID ~= nil then
+            return nil, nil, "ENTITY_NOT_ALLOWED"
+        end
+
+        if not store.hasValue then
+            return nil, nil, nil
+        end
+
+        return makePublicValue(store.value), nil, nil
+    end
+
+    if entityType == nil or entityID == nil then
+        return nil, nil, "ENTITY_REQUIRED"
+    end
+
+    if not isValidEntityType(entityType)
+        or not isValidEntityID(entityID)
+    then
+        return nil, nil, "INVALID_ENTITY"
+    end
+
+    if entityType ~= info.entityType then
+        return nil, nil, "ENTITY_TYPE_MISMATCH"
+    end
+
+    local entityKey = makeEntityKey(entityType, entityID)
+    local current = store.byKey[entityKey]
+
+    if current == nil then
+        return nil, nil, nil
+    end
+
+    return makePublicValue(current.value),
+        makePublicEntity(current.entity),
+        nil
+end
+
+function lib:IterateValues(providerID, fieldID)
+    if not isValidProviderID(providerID)
+        or providers[providerID] == nil
+        or not isValidFieldID(fieldID)
+    then
+        return emptyIterator
+    end
+
+    local field, info = getFieldRecord(providerID, fieldID)
+
+    if field == nil then
+        return emptyIterator
+    end
+
+    local store = ensureValueStore(providerID, fieldID, info)
+
+    if info.scope == "single" then
+        local done = false
+
+        return function()
+            if done or not store.hasValue then
+                return nil
+            end
+
+            done = true
+
+            return makePublicValue(store.value), nil
+        end
+    end
+
+    local index = 0
+
+    return function()
+        index = index + 1
+
+        local entityKey = store.order[index]
+
+        if entityKey == nil then
+            return nil
+        end
+
+        local current = store.byKey[entityKey]
+
+        if current == nil then
+            return nil
+        end
+
+        return makePublicValue(current.value),
+            makePublicEntity(current.entity)
     end
 end
 
