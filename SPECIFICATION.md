@@ -1,6 +1,6 @@
 # LibBrokerData-1.0 Specification
 
-**Status:** Draft 0.5
+**Status:** Draft 0.7 – implementation candidate
 **Library ID:** `LibBrokerData-1.0`
 **Repository:** `LibBrokerData`
 
@@ -130,6 +130,14 @@ lib.MAJOR = "LibBrokerData-1.0"
 lib.MINOR = 1
 ```
 
+The first complete core implementation described by this draft uses:
+
+```lua
+lib.MINOR = 5
+```
+
+`MINOR` is an implementation revision, not part of the public API identity.
+
 A newer embedded implementation must upgrade the existing global library table in place so that existing providers, fields, values, callbacks, and registration order are preserved.
 
 A future incompatible API may use a separate global identity such as:
@@ -190,11 +198,27 @@ Supported Provider metadata for 1.0:
 
 Unknown metadata keys must not cause registration to fail. Consumers may ignore metadata they do not understand.
 
-### 6.3 Provider metadata immutability
+### 6.3 Provider metadata immutability and access
 
 After successful registration, Provider metadata is immutable for the remainder of the current session.
 
-A compatible duplicate registration may return the existing Provider.
+The Provider object returned by `RegisterProvider()` and `GetProvider()` exposes registered metadata through read-only property access.
+
+Example:
+
+```lua
+local provider = LBD:GetProvider("MyAccountant")
+
+print(provider.label)
+print(provider.description)
+print(provider.addon)
+```
+
+Unknown Provider metadata stored at registration may also be exposed through the Provider object.
+
+Consumers must treat Provider objects and their exposed metadata as read-only.
+
+A compatible duplicate registration returns the existing Provider object.
 
 An incompatible redefinition is a conflict.
 
@@ -284,11 +308,28 @@ Normative rules for `scope = "entity"`:
 
 Requiring `entityType` for Entity-scoped Fields allows Consumers to understand the shape of a Field before the first value exists. It also allows Consumers to provide their own context-specific selection logic, such as selecting the current character, without adding that logic to LibBrokerData.
 
-### 7.3 Field metadata immutability
+### 7.3 Field metadata immutability and access
 
 After successful registration, Field metadata is immutable for the remainder of the current session.
 
-A compatible duplicate registration may return the existing Field.
+The Field object returned by `RegisterField()` and `GetField()` exposes registered metadata through read-only property access.
+
+Example:
+
+```lua
+local field = LBD:GetField("MyAccountant", "characterGold")
+
+print(field.label)
+print(field.type)
+print(field.scope)
+print(field.entityType)
+```
+
+Unknown Field metadata stored at registration may also be exposed through the Field object.
+
+Consumers must treat Field objects and their exposed metadata as read-only.
+
+A compatible duplicate registration returns the existing Field object.
 
 Changing the semantic meaning of a Field is a conflict. This includes changing its `type`, `scope`, or declared `entityType`.
 
@@ -318,6 +359,8 @@ Example:
 }
 ```
 
+For LibBrokerData-1.0, the defined Entity keys are `entityType`, `entityID`, and optional `entityLabel`. Additional Entity keys are rejected as `INVALID_ENTITY`.
+
 Recommended Entity types may include:
 
 ```text
@@ -338,6 +381,15 @@ The Entity identity is the combination of:
 ```text
 entityType + entityID
 ```
+
+For LibBrokerData-1.0, `entityID` may be:
+
+- a non-empty string, or
+- a finite number
+
+The Lua type is part of the identity. Therefore numeric `1` and string `"1"` are distinct Entity IDs.
+
+Implementations must preserve the typed Entity ID strongly enough to avoid collisions. Numeric Entity identity must not derive uniqueness solely from `tostring(entityID)`.
 
 `entityID` should be as stable as the source addon can reasonably provide.
 
@@ -512,6 +564,14 @@ Optionally:
     maximum = 100,
 }
 ```
+
+For LibBrokerData-1.0, the defined `progress` keys are exactly:
+
+- `current`
+- `maximum`
+- optional `minimum`
+
+Additional keys are rejected as `INVALID_VALUE`.
 
 Progress tables are logical immutable value snapshots.
 
@@ -1055,6 +1115,29 @@ changes = {
 }
 ```
 
+Boolean `false` is a valid Value and is distinct from `nil`.
+
+For example, a change from:
+
+```lua
+false
+```
+
+to:
+
+```lua
+true
+```
+
+must report:
+
+```lua
+oldValue = false
+newValue = true
+```
+
+It must not report `oldValue = nil`.
+
 For an Entity metadata-only change:
 
 ```lua
@@ -1356,6 +1439,8 @@ FIELD_CONFLICT
 
 Normal validation failures return these identifiers rather than intentionally raising Lua errors.
 
+Malformed Provider or Field metadata that does not have a more specific error code returns `INVALID_VALUE`. Unsupported Field types return `INVALID_FIELD_TYPE`; malformed Entity metadata returns `INVALID_ENTITY`.
+
 ## 23. Current context is consumer logic
 
 LibBrokerData does not define special semantics such as:
@@ -1608,27 +1693,22 @@ Only the runtime library directory needs to be embedded into normal addons.
 
 ## 33. 1.0 specification status
 
-Draft 0.5 incorporates the full pre-implementation consistency review and defines the structural and technical core required for the first implementation:
+Draft 0.7 is the audited implementation-candidate specification for `LibBrokerData-1.0`.
 
-- Provider and Field identity
-- Field scope
-- Entity identity and metadata
-- semantic value types
-- `SetValue()` semantics
-- atomic `SetValues()` input and behavior
-- public return signatures
-- iterator signatures and ordering behavior
-- callback registration and removal signatures
-- `EVENT_VALUES_CHANGED` payload
-- Entity and table-valued Value snapshot semantics
-- `GetValue()` scope validation
-- duplicate registration behavior
-- conflict handling
-- embedded MINOR upgrade behavior
-- independence from UI, consumers, and LibDataBroker
+The current implementation revision is:
 
-No further structural API issue is currently known. Implementation may begin after this Draft 0.5 review is accepted.
+```text
+MINOR = 5
+```
+
+The MINOR-5 implementation has been validated with automated in-game tests.
+
+The expanded suite covers Provider/Field discovery, typed Values, `single` and `entity` scopes, atomic batches, callbacks and events, snapshot semantics, ordering, typed Entity identity, large numeric Entity IDs, Boolean `false` change snapshots, strict 1.0 payload validation, MINOR upgrades, migration of existing Entity Values, and downgrade protection.
+
+No structural API mismatch is currently known from the implementation/specification audit.
+
+The public 1.0 API remains pre-release until the first real Producer/Consumer integration has been completed and any findings from that integration have been resolved.
 
 ---
 
-This specification remains a draft until Draft 0.5 is accepted and the first implementation has been tested.
+This specification remains an implementation-candidate draft until the first real Producer/Consumer integration has been completed and the 1.0 API is explicitly declared stable.
