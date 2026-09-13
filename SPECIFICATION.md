@@ -1,6 +1,6 @@
 # LibBrokerData-1.0 Specification
 
-**Status:** Draft 0.1  
+**Status:** Draft 0.2  
 **Library ID:** `LibBrokerData-1.0`  
 **Repository:** `LibBrokerData`
 
@@ -8,9 +8,26 @@
 
 LibBrokerData is a dependency-free data library for World of Warcraft addons.
 
-It allows producer addons to publish structured, individually addressable values that consumer addons can discover and use independently of presentation.
+It allows producer addons to publish structured, individually addressable semantic values that consumer addons can discover and use independently of presentation.
 
-LibBrokerData provides data only. It does not define UI, formatting, tooltips, panel layout, persistence, or communication between game clients.
+LibBrokerData provides data only.
+
+It does not define:
+
+- UI
+- panels
+- lines
+- alignment
+- colors
+- icons or icon placement
+- formatting
+- tooltips
+- persistence
+- SavedVariables
+- current-character selection
+- communication between game clients
+
+A consumer decides which values are displayed, where they are displayed, how they are combined, and how they are formatted.
 
 ## 2. Design principles
 
@@ -27,11 +44,50 @@ LibBrokerData-1.0:
 - provides its own callback/event mechanism
 - supports multiple embedded copies safely
 - keeps data identity separate from display labels
-- keeps field identity separate from entity identity
+- keeps Field identity separate from Entity identity
+- exposes semantic source data rather than presentation-oriented strings
+- remains independent of any specific consumer such as Broker Panels
 
-The library may coexist with LibDataBroker. An addon may publish classic LibDataBroker objects and LibBrokerData values at the same time.
+LibBrokerData may coexist with LibDataBroker. An addon may publish classic LibDataBroker objects and LibBrokerData values at the same time.
 
-## 3. Core data model
+## 3. No display semantics
+
+LibBrokerData must not introduce presentation-oriented metadata such as:
+
+```text
+line1
+line2
+alignment
+color
+iconPosition
+panel
+preferredDisplay
+secondaryText
+primaryField
+secondaryField
+preferredLine
+preferredPanel
+compactLabel
+displayOrderForBrokerPanels
+```
+
+If a producer exposes several pieces of information, each semantic value is registered as a separate Field.
+
+Example:
+
+```text
+MyAccountant
+├── realmGold
+├── characterGold
+├── sessionIncome
+└── sessionExpenses
+```
+
+A consumer may later combine those Fields in one line, multiple lines, different panels, or any other presentation.
+
+## 4. Core data model
+
+The core hierarchy is:
 
 ```text
 Provider
@@ -53,9 +109,11 @@ MyAccountant
     └── Paljande  → 266g
 ```
 
-`characterGold` is registered only once. Multiple character values are distinguished through entity metadata rather than by encoding character identity into the Field ID.
+`characterGold` is registered only once.
 
-## 4. Library identity and implementation revision
+Multiple character values are distinguished through Entity identity rather than by encoding character identity into the Field ID.
+
+## 5. Library identity and implementation revision
 
 The public library ID is:
 
@@ -80,9 +138,13 @@ A future incompatible API may use a separate global identity such as:
 _G["LibBrokerData-2.0"]
 ```
 
-## 5. Provider
+The exact in-place upgrade behavior remains to be finalized before implementation.
 
-A provider is a logical data source, normally an addon.
+## 6. Provider
+
+A Provider is a logical data source, normally an addon.
+
+Example:
 
 ```lua
 local provider = LBD:RegisterProvider("MyAccountant", {
@@ -90,9 +152,14 @@ local provider = LBD:RegisterProvider("MyAccountant", {
 })
 ```
 
-### 5.1 Provider ID
+### 6.1 Provider ID
 
-The Provider ID must be stable, non-localized, unique within LibBrokerData, and case-sensitive.
+The Provider ID must be:
+
+- stable
+- non-localized
+- unique within LibBrokerData
+- case-sensitive
 
 Recommended characters:
 
@@ -102,7 +169,19 @@ A-Z a-z 0-9 _ - . :
 
 Spaces should not be used.
 
-### 5.2 Provider metadata
+Examples:
+
+```text
+MyAccountant
+HunterThreat
+PetAdvisor
+PortalMaster
+MyAddon:Character
+```
+
+### 6.2 Provider metadata
+
+Supported Provider metadata for 1.0:
 
 | Key | Required | Meaning |
 | --- | --- | --- |
@@ -110,11 +189,23 @@ Spaces should not be used.
 | `description` | no | localized description |
 | `addon` | no | technical addon name |
 
-Unknown metadata keys must not cause registration to fail.
+Unknown metadata keys must not cause registration to fail. Consumers may ignore metadata they do not understand.
 
-## 6. Field
+### 6.3 Provider metadata immutability
+
+After successful registration, Provider metadata is immutable for the remainder of the current session.
+
+A compatible duplicate registration may return the existing Provider.
+
+An incompatible redefinition is a conflict.
+
+The exact conflict return behavior remains to be finalized before implementation.
+
+## 7. Field
 
 A Field describes one semantic value.
+
+Example:
 
 ```lua
 provider:RegisterField("characterGold", {
@@ -123,9 +214,13 @@ provider:RegisterField("characterGold", {
 })
 ```
 
-The Field ID is the stable technical identity. Localized labels must not be used as technical IDs.
+The Field ID is the stable technical identity.
 
-### 6.1 Field metadata
+Localized labels must not be used as technical IDs.
+
+### 7.1 Field metadata
+
+Supported Field metadata for 1.0:
 
 | Key | Required | Meaning |
 | --- | --- | --- |
@@ -138,11 +233,31 @@ The Field ID is the stable technical identity. Localized labels must not be used
 
 Unknown metadata keys must be tolerated.
 
-## 7. Entities
+### 7.2 Field metadata immutability
 
-A Field may have either one value without an Entity or multiple values belonging to distinct Entities.
+After successful registration, Field metadata is immutable for the remainder of the current session.
 
-Entity identity is independent of the Field ID.
+A compatible duplicate registration may return the existing Field.
+
+Changing the semantic meaning of a Field, for example from:
+
+```text
+money
+```
+
+to:
+
+```text
+text
+```
+
+is a conflict.
+
+## 8. Entities
+
+A Field may expose values associated with Entities.
+
+Entity identity is independent of Field identity.
 
 An Entity consists of:
 
@@ -162,33 +277,86 @@ Example:
 }
 ```
 
-Recommended entity types may include `character`, `pet`, `realm`, `guild`, `account`, and `profession`.
+Recommended Entity types may include:
+
+```text
+character
+pet
+realm
+guild
+account
+profession
+```
 
 The library does not attach built-in semantics to these names.
 
-### 7.1 Stable entity identity
+### 8.1 Stable Entity identity
+
+The Entity identity is the combination of:
+
+```text
+entityType + entityID
+```
 
 `entityID` should be as stable as the source addon can reasonably provide.
 
-For WoW characters, a stable character GUID is preferred when available. A display label such as a character name must not be the only identity when a more stable technical key exists.
+For WoW characters, a stable character GUID is preferred when available.
 
-## 8. Values
+A display label such as a character name must not be used as the only identity when a more stable technical key exists.
 
-A Field can publish one unscoped value or multiple entity-scoped values.
+### 8.2 Entity metadata changes
+
+Entity identity is stable, but Entity metadata may change.
 
 Example:
+
+Before:
+
+```lua
+{
+    entityType = "character",
+    entityID = "Player-1234-0000ABCD",
+    entityLabel = "Pitronas",
+}
+```
+
+Later:
+
+```lua
+{
+    entityType = "character",
+    entityID = "Player-1234-0000ABCD",
+    entityLabel = "Pitronas-NewName",
+}
+```
+
+The Entity remains the same because `entityType` and `entityID` are unchanged.
+
+An Entity metadata change is treated as a relevant change even if the effective data value itself did not change.
+
+Consumers must be notified through `EVENT_VALUES_CHANGED`.
+
+## 9. Values
+
+A Field can publish an unscoped value or Entity-scoped values.
+
+Examples:
 
 ```text
 realmGold
 └── 14244856
+```
 
+and:
+
+```text
 characterGold
 ├── character / Player-...ABCD / Pitronas → 5639221
 ├── character / Player-...EF01 / Temlin   → 4213345
 └── character / Player-...2345 / Paljande → 2661287
 ```
 
-A Field ID must not be expanded with entity identity.
+A Field ID must not be expanded with Entity identity.
 
 Avoid:
 
@@ -204,7 +372,9 @@ entityType  = character
 entityID    = Player-1234-0000ABCD
 ```
 
-## 9. Data types
+## 10. Data types
+
+LibBrokerData-1.0 defines these initial semantic types:
 
 | Type | Lua value | Semantics |
 | --- | --- | --- |
@@ -218,21 +388,53 @@ entityID    = Player-1234-0000ABCD
 | `status` | string | status identifier |
 | `progress` | table | progress value |
 
-### 9.1 money
+### 10.1 money
 
-`money` values are integers in copper. Formatting is the consumer's responsibility.
+`money` values are integers in copper.
 
-### 9.2 percent
+Example:
 
-Percent values are stored directly as percentages. `82` means `82%`. Values above 100 are valid.
+```lua
+14244856
+```
 
-### 9.3 duration
+Formatting such as:
 
-Duration values are seconds. Formatting is the consumer's responsibility.
+```text
+1,424g 48s 56c
+```
 
-### 9.4 status
+is the consumer's responsibility.
 
-Recommended identifiers:
+### 10.2 percent
+
+Percent values are stored directly as percentages.
+
+```lua
+82
+```
+
+means:
+
+```text
+82%
+```
+
+Values above 100 are valid.
+
+### 10.3 duration
+
+Duration values are seconds.
+
+```lua
+3665
+```
+
+Formatting is the consumer's responsibility.
+
+### 10.4 status
+
+Recommended status identifiers:
 
 ```text
 ok
@@ -245,7 +447,11 @@ unknown
 
 Additional provider-specific values are allowed.
 
-### 9.5 progress
+Consumers must tolerate unknown status values.
+
+### 10.5 progress
+
+A progress value is:
 
 ```lua
 {
@@ -264,19 +470,23 @@ Optionally:
 }
 ```
 
-Progress tables are treated as immutable values. Producers must publish a new table when changing progress data.
+Progress tables are treated as immutable values.
 
-## 10. Nil and unavailable data
+Producers must publish a new table when changing progress data.
+
+## 11. Nil and unavailable data
 
 A registered Field remains registered even when no current value exists.
 
-Setting a value to `nil` means that the Field exists but no current value is available for that value scope.
+Setting a value to `nil` means:
 
-The consumer decides how unavailable values are presented.
+> The Field exists, but no current value is available for that value scope.
 
-## 11. Producer API
+A consumer decides whether to hide the value, show a placeholder, hide a complete line, or use another presentation.
 
-The initial producer API is intended to include:
+## 12. Producer API
+
+The initial Producer API is intended to include:
 
 ```lua
 LBD:RegisterProvider(providerID, info)
@@ -293,13 +503,15 @@ provider:SetValues(values)
 
 `RegisterField` returns a Field object.
 
-### 11.1 SetValue without Entity
+The concrete public return signatures remain to be finalized before implementation.
+
+### 12.1 SetValue without Entity
 
 ```lua
 provider:SetValue("realmGold", 14244856)
 ```
 
-### 11.2 SetValue with Entity
+### 12.2 SetValue with Entity
 
 ```lua
 provider:SetValue("characterGold", 5639221, {
@@ -309,7 +521,7 @@ provider:SetValue("characterGold", 5639221, {
 })
 ```
 
-### 11.3 Atomic multi-value updates
+### 12.3 Atomic SetValues
 
 `SetValues()` is intended for updating several logically related values as one operation.
 
@@ -317,15 +529,17 @@ Required behavior:
 
 1. validate all submitted updates
 2. apply all valid changes
-3. emit one consolidated change notification afterward
+3. update Entity metadata where applicable
+4. emit one consolidated change notification afterward
+5. never expose a partially updated logical set through the change event
 
-Consumers must never observe a partially updated logical set through the change event.
+`SetValues()` may therefore produce multiple entries in one `EVENT_VALUES_CHANGED` payload.
 
-The final concrete input shape for `SetValues()` will be fixed before implementation.
+The final concrete input structure for `SetValues()` remains to be finalized before implementation.
 
-## 12. Consumer API
+## 13. Consumer API
 
-The initial consumer API is intended to include:
+The initial Consumer API is intended to include:
 
 ```lua
 LBD:GetProvider(providerID)
@@ -338,24 +552,64 @@ LBD:IterateFields(providerID)
 LBD:IterateValues(providerID, fieldID)
 ```
 
-Consumers must be able to discover providers and fields regardless of load order.
+Consumers must be able to discover Providers and Fields regardless of load order.
 
-## 13. Registration order
+## 14. IterateValues
 
-`IterateProviders()` should preserve provider registration order.
+`IterateValues(providerID, fieldID)` returns:
 
-`IterateFields()` should preserve field registration order.
+```lua
+for value, entity in LBD:IterateValues(providerID, fieldID) do
+    ...
+end
+```
 
-For entity-scoped values, the library should preserve first-seen entity order unless a future version explicitly defines another order.
+For an unscoped value:
+
+```lua
+value = 14244856
+entity = nil
+```
+
+For an Entity-scoped value:
+
+```lua
+value = 4250000
+
+entity = {
+    entityType = "character",
+    entityID = "Player-1234-0000EF01",
+    entityLabel = "Temlin",
+}
+```
+
+The Entity table keeps Entity metadata together and allows future optional metadata to be added without changing the iterator signature.
+
+Consumers must treat returned Entity tables as read-only.
+
+The library may replace an Entity metadata table when metadata changes.
+
+Entity-scoped values are iterated in first-seen Entity order.
+
+## 15. Registration and iteration order
+
+`IterateProviders()` preserves Provider registration order.
+
+`IterateFields()` preserves Field registration order.
+
+`IterateValues()` preserves first-seen Entity order for Entity-scoped values.
 
 Consumers remain free to apply their own sorting.
 
-## 14. Events and callbacks
+## 16. Events and callbacks
 
 LibBrokerData provides its own callback system.
 
+The initial public API is intended to include:
+
 ```lua
 local token = LBD:RegisterCallback(event, callback)
+
 LBD:UnregisterCallback(token)
 ```
 
@@ -369,47 +623,163 @@ LBD.EVENT_FIELD_REGISTERED
 LBD.EVENT_VALUES_CHANGED
 ```
 
-### 14.1 Provider registered
+### 16.1 Provider registered
 
 ```lua
 callback(providerID, provider)
 ```
 
-### 14.2 Field registered
+### 16.2 Field registered
 
 ```lua
 callback(providerID, fieldID, field)
 ```
 
-### 14.3 Values changed
+### 16.3 Values changed
+
+The callback signature is:
 
 ```lua
 callback(providerID, changes)
 ```
 
-Each change should identify at least the Field ID, old value, new value, and optional entity identity.
+`changes` is an array of change records.
 
-No change event is emitted when the effective value did not change.
+For an unscoped Field:
 
-Callbacks must be isolated so that one failing consumer does not prevent remaining callbacks from running.
+```lua
+changes = {
+    {
+        fieldID = "realmGold",
 
-## 15. Load order
+        oldValue = 14000000,
+        newValue = 14244856,
 
-The library must support both producer-first and consumer-first loading.
+        oldEntity = nil,
+        newEntity = nil,
+    },
+}
+```
+
+For an Entity-scoped Field:
+
+```lua
+changes = {
+    {
+        fieldID = "characterGold",
+
+        oldValue = 4213345,
+        newValue = 4250000,
+
+        oldEntity = {
+            entityType = "character",
+            entityID = "Player-1234-0000EF01",
+            entityLabel = "Temlin",
+        },
+
+        newEntity = {
+            entityType = "character",
+            entityID = "Player-1234-0000EF01",
+            entityLabel = "Temlin",
+        },
+    },
+}
+```
+
+For an Entity metadata-only change:
+
+```lua
+changes = {
+    {
+        fieldID = "characterGold",
+
+        oldValue = 4250000,
+        newValue = 4250000,
+
+        oldEntity = {
+            entityType = "character",
+            entityID = "Player-1234-0000EF01",
+            entityLabel = "Temlin",
+        },
+
+        newEntity = {
+            entityType = "character",
+            entityID = "Player-1234-0000EF01",
+            entityLabel = "Temlin-NewName",
+        },
+    },
+}
+```
+
+### 16.4 VALUES_CHANGED rules
+
+The following rules are normative:
+
+- `fieldID` is always present.
+- `oldValue` is the previous effective value.
+- `newValue` is the new effective value.
+- `oldEntity` and `newEntity` are `nil` for unscoped values.
+- Entity-scoped changes contain Entity metadata.
+- `entityType` and `entityID` identify the Entity.
+- Entity metadata may change without changing Entity identity.
+- `SetValues()` may produce multiple change records in one event.
+- No change record is produced when neither effective value nor Entity metadata changed.
+- An Entity metadata-only change produces a change record even when `oldValue == newValue`.
+- Consumers must be able to determine whether a displayed source reference is affected without rereading the complete Provider.
+- After the callback begins, normal getters and iterators must expose the new state.
+
+Using `oldEntity` and `newEntity` rather than flattening Entity metadata keeps the callback format extensible if optional Entity metadata is added later.
+
+## 17. Callback isolation
+
+A failing consumer must not prevent remaining callbacks from running.
+
+Callbacks are isolated from one another.
+
+The implementation should use WoW-compatible protected error handling.
+
+## 18. Load order
+
+The library must support both directions.
+
+Producer first:
+
+```text
+Producer addon loads
+→ registers data
+→ consumer loads later
+→ consumer discovers existing registry
+```
+
+Consumer first:
+
+```text
+Consumer loads
+→ registers callbacks
+→ producer loads later
+→ registration events notify consumer
+```
 
 No fixed addon load order is part of the specification.
 
-## 16. Duplicate registration
+## 19. Duplicate registration
 
-Provider and Field registration must be idempotent when repeated registration is compatible.
+Provider and Field registration must be idempotent when the repeated registration is compatible.
 
-Registering the same Provider ID again must not create a second Provider, discard values, or duplicate the registration event.
+Registering the same Provider ID again:
 
-Registering the same Field ID again follows the same principle.
+- must not create a second Provider
+- must not discard values
+- must not duplicate the registration event
+- must return the existing Provider when compatible
 
-An incompatible semantic redefinition, such as changing a Field from `money` to `text`, is a conflict.
+Registering the same Field ID again under the same Provider follows the same principle.
 
-## 17. Errors
+An incompatible semantic redefinition is a conflict.
+
+The exact return behavior and conflict rules remain to be finalized before implementation.
+
+## 20. Errors
 
 The public API should prefer explicit return values over intentionally raising Lua errors for normal validation failures.
 
@@ -427,35 +797,179 @@ PROVIDER_CONFLICT
 FIELD_CONFLICT
 ```
 
-Exact return signatures will be finalized before implementation.
+Exact return signatures remain to be finalized before implementation.
 
-## 18. No formatting
+## 21. Current context is consumer logic
 
-LibBrokerData never converts semantic values into final display strings.
+LibBrokerData does not define special semantics such as:
 
-Consumers own all presentation and formatting.
+```text
+currentCharacter
+currentRealm
+currentGuild
+currentPet
+```
 
-## 19. No UI semantics
+LibBrokerData only exposes the available Entities.
 
-LibBrokerData does not define font, size, color, alignment, line position, icon position, tooltip layout, panel position, spacing, or visibility behavior.
+Example:
 
-A status value such as `warning` does not imply a specific color.
+```text
+characterGold
+├── Player-A → 563g
+├── Player-B → 421g
+└── Player-C → 266g
+```
 
-## 20. Persistence
+A consumer that wants the current character may use WoW APIs such as:
+
+```lua
+UnitGUID("player")
+```
+
+and select the matching Entity itself.
+
+This behavior belongs to the consumer, not LibBrokerData.
+
+## 22. Non-normative Broker Panels reference example
+
+A consumer such as Broker Panels may internally refer to a fixed Entity approximately like this:
+
+```lua
+{
+    sourceType = "LibBrokerData",
+    providerID = "MyAccountant",
+    fieldID = "characterGold",
+
+    entity = {
+        mode = "fixed",
+        entityType = "character",
+        entityID = "Player-1234-0000ABCD",
+    },
+}
+```
+
+Or it may use its own dynamic selection mode:
+
+```lua
+{
+    sourceType = "LibBrokerData",
+    providerID = "MyAccountant",
+    fieldID = "characterGold",
+
+    entity = {
+        mode = "currentCharacter",
+    },
+}
+```
+
+`entity.mode` is consumer-specific configuration.
+
+It is not part of LibBrokerData.
+
+LibBrokerData only needs to provide stable source information:
+
+```text
+providerID
+fieldID
+entityType
+entityID
+entityLabel
+```
+
+## 23. LibDataBroker independence
+
+LibBrokerData does not replace LibDataBroker.
+
+An addon may simultaneously publish:
+
+```text
+LibDataBroker-1.1
+→ classic broker presentation
+```
+
+and:
+
+```text
+LibBrokerData-1.0
+→ structured semantic values
+```
+
+Example:
+
+```text
+LibDataBroker:
+[Gold Icon] 1424g
+
+LibBrokerData:
+├── realmGold
+├── characterGold
+├── sessionIncome
+└── sessionExpenses
+```
+
+A consumer may use both systems in parallel.
+
+Neither library depends on the other.
+
+## 24. No formatting
+
+LibBrokerData never converts semantic data into final display strings.
+
+Examples:
+
+```text
+money:    14244856
+percent:  82
+duration: 3665
+```
+
+A consumer decides how these values appear.
+
+## 25. No UI semantics
+
+LibBrokerData does not define:
+
+- font
+- size
+- color
+- alignment
+- line position
+- icon position
+- tooltip layout
+- panel position
+- spacing
+- visibility behavior
+
+A `status` value such as `warning` does not imply a specific color.
+
+## 26. Persistence
 
 LibBrokerData stores no SavedVariables and has no persistence responsibility.
 
-A producer owns its source data. A consumer owns its configuration. LibBrokerData exposes current runtime data only.
+A Producer owns its source data.
 
-## 21. Relationship to other WoW libraries
+A Consumer owns its configuration.
+
+LibBrokerData only exposes current runtime data.
+
+## 27. Relationship to other WoW libraries
 
 LibBrokerData is an independent implementation.
 
-It uses established architectural ideas common in WoW addon development, such as registries, producer/consumer separation, stable technical IDs, callback-based change notifications, and metadata-driven discovery.
+It uses established architectural ideas common in WoW addon development, such as:
+
+- registries
+- Producer/Consumer separation
+- stable technical IDs
+- callback-based change notifications
+- metadata-driven discovery
 
 It is not a fork or derivative implementation of LibDataBroker, DataStore, LibDogTag, Ace libraries, or other third-party libraries.
 
-## 22. Out of scope for 1.0
+No third-party source code is required for its implementation.
+
+## 28. Out of scope for 1.0
 
 The initial specification intentionally excludes:
 
@@ -472,8 +986,10 @@ The initial specification intentionally excludes:
 - generic list/table payloads
 - expression parsing
 - consumer-specific formatting rules
+- current-character/current-realm/current-guild/current-pet semantics
+- display recommendations for specific consumers
 
-## 23. Example: MyAccountant
+## 29. Example: MyAccountant
 
 ```lua
 local LBD = _G["LibBrokerData-1.0"]
@@ -512,9 +1028,9 @@ provider:SetValue("characterGold", 4213345, {
 })
 ```
 
-A consumer can display those values freely or combine them with fields from entirely different providers.
+A consumer can display those values freely or combine them with Fields from entirely different Providers.
 
-## 24. Repository structure
+## 30. Repository structure
 
 Recommended initial structure:
 
@@ -530,6 +1046,18 @@ LibBrokerData/
 
 Only the runtime library directory needs to be embedded into normal addons.
 
+## 31. Remaining 1.0 decisions before implementation
+
+Before the first implementation, the following points still need to be finalized:
+
+1. concrete `SetValues()` input structure
+2. concrete public API return signatures
+3. exact library revision upgrade behavior
+4. exact conflict behavior for incompatible duplicate registration
+5. any additional validation rules required for Field scope and Entity usage
+
+The `EVENT_VALUES_CHANGED` payload and `IterateValues()` return shape are defined by Draft 0.2 and should no longer be considered open unless implementation testing reveals a concrete problem.
+
 ---
 
-This specification remains a draft until the concrete 1.0 API signatures, `SetValues()` input structure, callback payload structure, and version-upgrade behavior have been implemented and tested.
+This specification remains a draft until the remaining 1.0 decisions have been finalized and the first implementation has been tested.
