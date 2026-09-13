@@ -1,5 +1,5 @@
 local MAJOR = "LibBrokerData-1.0"
-local MINOR = 4
+local MINOR = 5
 
 local existing = _G[MAJOR]
 
@@ -115,48 +115,6 @@ local function deepEqual(left, right, seen)
     return true
 end
 
-local function isSnapshotSafe(value, seen)
-    local valueType = type(value)
-
-    if valueType == "nil" or valueType == "string" or valueType == "boolean" then
-        return true
-    end
-
-    if valueType == "number" then
-        return isFiniteNumber(value)
-    end
-
-    if valueType ~= "table" then
-        return false
-    end
-
-    seen = seen or {}
-
-    if seen[value] then
-        return true
-    end
-
-    seen[value] = true
-
-    for key, item in pairs(value) do
-        local keyType = type(key)
-
-        if keyType ~= "string" and keyType ~= "number" and keyType ~= "boolean" then
-            return false
-        end
-
-        if keyType == "number" and not isFiniteNumber(key) then
-            return false
-        end
-
-        if not isSnapshotSafe(item, seen) then
-            return false
-        end
-    end
-
-    return true
-end
-
 local function isValidTechnicalID(value)
     return type(value) == "string"
         and value ~= ""
@@ -181,14 +139,6 @@ local function isValidEntityID(entityID)
     end
 
     return isFiniteNumber(entityID)
-end
-
-local function makeEntityKey(entityType, entityID)
-    return entityType
-        .. "\031"
-        .. type(entityID)
-        .. "\031"
-        .. tostring(entityID)
 end
 
 local fieldTypes = {
@@ -336,8 +286,11 @@ local function validateEntity(entity, expectedEntityType)
         return nil, "INVALID_ENTITY"
     end
 
-    for key, value in pairs(entity) do
-        if type(key) ~= "string" or not isSnapshotSafe(value) then
+    for key in pairs(entity) do
+        if key ~= "entityType"
+            and key ~= "entityID"
+            and key ~= "entityLabel"
+        then
             return nil, "INVALID_ENTITY"
         end
     end
@@ -382,7 +335,16 @@ local function validateValue(info, value)
             return false
         end
 
-        return isSnapshotSafe(value)
+        for key in pairs(value) do
+            if key ~= "minimum"
+                and key ~= "current"
+                and key ~= "maximum"
+            then
+                return false
+            end
+        end
+
+        return true
     end
 
     return false
@@ -560,6 +522,51 @@ local function clearObject(object)
     end
 end
 
+local function migrateEntityStore(store)
+    if type(store.byKey) ~= "table" then
+        store.byKey = {}
+    end
+
+    if type(store.order) ~= "table" then
+        store.order = {}
+    end
+
+    if store.entityKeyMode == "entityID" then
+        return
+    end
+
+    local oldByKey = store.byKey
+    local oldOrder = store.order
+    local newByID = {}
+    local newOrder = {}
+
+    for index = 1, #oldOrder do
+        local oldKey = oldOrder[index]
+        local current = oldByKey[oldKey]
+        local entity = current and current.entity or nil
+        local entityID = entity and entity.entityID or nil
+
+        if isValidEntityID(entityID) and newByID[entityID] == nil then
+            newByID[entityID] = current
+            newOrder[#newOrder + 1] = entityID
+        end
+    end
+
+    for _, current in pairs(oldByKey) do
+        local entity = current and current.entity or nil
+        local entityID = entity and entity.entityID or nil
+
+        if isValidEntityID(entityID) and newByID[entityID] == nil then
+            newByID[entityID] = current
+            newOrder[#newOrder + 1] = entityID
+        end
+    end
+
+    store.byKey = newByID
+    store.order = newOrder
+    store.entityKeyMode = "entityID"
+end
+
 local function ensureValueStore(providerID, fieldID, info)
     if type(values[providerID]) ~= "table" then
         values[providerID] = {}
@@ -569,13 +576,7 @@ local function ensureValueStore(providerID, fieldID, info)
 
     if type(store) == "table" and store.scope == info.scope then
         if info.scope == "entity" then
-            if type(store.byKey) ~= "table" then
-                store.byKey = {}
-            end
-
-            if type(store.order) ~= "table" then
-                store.order = {}
-            end
+            migrateEntityStore(store)
         end
 
         return store
@@ -592,6 +593,7 @@ local function ensureValueStore(providerID, fieldID, info)
             scope = "entity",
             byKey = {},
             order = {},
+            entityKeyMode = "entityID",
         }
     end
 
@@ -672,9 +674,9 @@ local function getFieldRecord(providerID, fieldID)
     return field, fieldInfo[providerID][fieldID]
 end
 
-local function removeEntityFromOrder(store, entityKey)
+local function removeEntityFromOrder(store, entityID)
     for index = 1, #store.order do
-        if store.order[index] == entityKey then
+        if store.order[index] == entityID then
             table.remove(store.order, index)
             return
         end
@@ -734,14 +736,13 @@ local function prepareUpdate(providerID, fieldID, value, entity)
                 return {
                     changed = false,
                     fieldID = fieldID,
-                    targetKey = fieldID,
+                    scope = "single",
                 }, nil
             end
 
             return {
                 changed = true,
                 fieldID = fieldID,
-                targetKey = fieldID,
                 scope = "single",
                 remove = true,
                 change = makeChange(
@@ -760,20 +761,25 @@ local function prepareUpdate(providerID, fieldID, value, entity)
             return {
                 changed = false,
                 fieldID = fieldID,
-                targetKey = fieldID,
+                scope = "single",
             }, nil
+        end
+
+        local oldValue = nil
+
+        if store.hasValue then
+            oldValue = store.value
         end
 
         return {
             changed = true,
             fieldID = fieldID,
-            targetKey = fieldID,
             scope = "single",
             remove = false,
             value = newValue,
             change = makeChange(
                 fieldID,
-                store.hasValue and store.value or nil,
+                oldValue,
                 newValue,
                 nil,
                 nil
@@ -787,29 +793,24 @@ local function prepareUpdate(providerID, fieldID, value, entity)
         return nil, entityError
     end
 
-    local entityKey = makeEntityKey(
-        entitySnapshot.entityType,
-        entitySnapshot.entityID
-    )
-
-    local targetKey = fieldID .. "\030" .. entityKey
-    local current = store.byKey[entityKey]
+    local entityID = entitySnapshot.entityID
+    local current = store.byKey[entityID]
 
     if value == nil then
         if current == nil then
             return {
                 changed = false,
                 fieldID = fieldID,
-                targetKey = targetKey,
+                scope = "entity",
+                entityID = entityID,
             }, nil
         end
 
         return {
             changed = true,
             fieldID = fieldID,
-            targetKey = targetKey,
             scope = "entity",
-            entityKey = entityKey,
+            entityID = entityID,
             remove = true,
             change = makeChange(
                 fieldID,
@@ -830,25 +831,28 @@ local function prepareUpdate(providerID, fieldID, value, entity)
         return {
             changed = false,
             fieldID = fieldID,
-            targetKey = targetKey,
+            scope = "entity",
+            entityID = entityID,
         }, nil
     end
+
+    local oldValue = current and current.value
+    local oldEntity = current and current.entity
 
     return {
         changed = true,
         fieldID = fieldID,
-        targetKey = targetKey,
         scope = "entity",
-        entityKey = entityKey,
+        entityID = entityID,
         remove = false,
         value = newValue,
         entity = entitySnapshot,
         isNewEntity = current == nil,
         change = makeChange(
             fieldID,
-            current and current.value or nil,
+            oldValue,
             newValue,
-            current and current.entity or nil,
+            oldEntity,
             entitySnapshot
         ),
     }, nil
@@ -875,18 +879,18 @@ local function applyPreparedUpdate(providerID, action)
     end
 
     if action.remove then
-        store.byKey[action.entityKey] = nil
-        removeEntityFromOrder(store, action.entityKey)
+        store.byKey[action.entityID] = nil
+        removeEntityFromOrder(store, action.entityID)
         return
     end
 
-    store.byKey[action.entityKey] = {
+    store.byKey[action.entityID] = {
         value = makePublicValue(action.value),
         entity = makePublicEntity(action.entity),
     }
 
     if action.isNewEntity then
-        store.order[#store.order + 1] = action.entityKey
+        store.order[#store.order + 1] = action.entityID
     end
 end
 
@@ -1215,11 +1219,30 @@ function providerMethods:SetValues(updates)
             return nil, preparationError
         end
 
-        if seenTargets[action.targetKey] then
-            return nil, "DUPLICATE_UPDATE"
+        local fieldTargets = seenTargets[action.fieldID]
+
+        if fieldTargets == nil then
+            fieldTargets = {
+                single = false,
+                entities = {},
+            }
+            seenTargets[action.fieldID] = fieldTargets
         end
 
-        seenTargets[action.targetKey] = true
+        if action.scope == "single" then
+            if fieldTargets.single then
+                return nil, "DUPLICATE_UPDATE"
+            end
+
+            fieldTargets.single = true
+        else
+            if fieldTargets.entities[action.entityID] then
+                return nil, "DUPLICATE_UPDATE"
+            end
+
+            fieldTargets.entities[action.entityID] = true
+        end
+
         actions[#actions + 1] = action
     end
 
@@ -1292,8 +1315,7 @@ function lib:GetValue(providerID, fieldID, entityType, entityID)
         return nil, nil, "ENTITY_TYPE_MISMATCH"
     end
 
-    local entityKey = makeEntityKey(entityType, entityID)
-    local current = store.byKey[entityKey]
+    local current = store.byKey[entityID]
 
     if current == nil then
         return nil, nil, nil
@@ -1339,13 +1361,13 @@ function lib:IterateValues(providerID, fieldID)
     return function()
         index = index + 1
 
-        local entityKey = store.order[index]
+        local entityID = store.order[index]
 
-        if entityKey == nil then
+        if entityID == nil then
             return nil
         end
 
-        local current = store.byKey[entityKey]
+        local current = store.byKey[entityID]
 
         if current == nil then
             return nil
