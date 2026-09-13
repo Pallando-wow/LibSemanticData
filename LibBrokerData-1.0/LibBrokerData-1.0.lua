@@ -1,5 +1,5 @@
 local MAJOR = "LibBrokerData-1.0"
-local MINOR = 2
+local MINOR = 3
 
 local existing = _G[MAJOR]
 
@@ -35,6 +35,18 @@ if type(state.providerOrder) ~= "table" then
     state.providerOrder = {}
 end
 
+if type(state.fields) ~= "table" then
+    state.fields = {}
+end
+
+if type(state.fieldInfo) ~= "table" then
+    state.fieldInfo = {}
+end
+
+if type(state.fieldOrder) ~= "table" then
+    state.fieldOrder = {}
+end
+
 if type(state.callbacks) ~= "table" then
     state.callbacks = {}
 end
@@ -57,18 +69,56 @@ end
 local providerMetatable = lib._providerMetatable
 
 if type(providerMetatable) ~= "table" then
-    providerMetatable = {
-        __index = providerMethods,
-    }
+    providerMetatable = { __index = providerMethods }
     lib._providerMetatable = providerMetatable
 else
     providerMetatable.__index = providerMethods
 end
 
+local fieldMethods = lib._fieldMethods
+
+if type(fieldMethods) ~= "table" then
+    fieldMethods = {}
+    lib._fieldMethods = fieldMethods
+end
+
+local fieldMetatable = lib._fieldMetatable
+
+if type(fieldMetatable) ~= "table" then
+    fieldMetatable = { __index = fieldMethods }
+    lib._fieldMetatable = fieldMetatable
+else
+    fieldMetatable.__index = fieldMethods
+end
+
+local fieldTypes = {
+    text = true,
+    number = true,
+    integer = true,
+    percent = true,
+    money = true,
+    duration = true,
+    boolean = true,
+    status = true,
+    progress = true,
+}
+
 local function isValidProviderID(providerID)
     return type(providerID) == "string"
         and providerID ~= ""
         and providerID:match("^[A-Za-z0-9_%.:%-]+$") ~= nil
+end
+
+local function isValidFieldID(fieldID)
+    return type(fieldID) == "string"
+        and fieldID ~= ""
+        and fieldID:match("^[A-Za-z0-9_%.:%-]+$") ~= nil
+end
+
+local function isValidEntityType(entityType)
+    return type(entityType) == "string"
+        and entityType ~= ""
+        and entityType:match("^[A-Za-z0-9_%.:%-]+$") ~= nil
 end
 
 local function copyTable(source)
@@ -117,6 +167,80 @@ local function isCompatibleProviderInfo(existingInfo, newInfo)
     return true
 end
 
+local function validateFieldInfo(info)
+    if type(info) ~= "table" then
+        return nil, "INVALID_VALUE"
+    end
+
+    if type(info.label) ~= "string" or info.label == "" then
+        return nil, "INVALID_VALUE"
+    end
+
+    if type(info.type) ~= "string" or fieldTypes[info.type] ~= true then
+        return nil, "INVALID_FIELD_TYPE"
+    end
+
+    if info.scope ~= "single" and info.scope ~= "entity" then
+        return nil, "INVALID_VALUE"
+    end
+
+    if info.scope == "entity" then
+        if not isValidEntityType(info.entityType) then
+            return nil, "INVALID_ENTITY"
+        end
+    elseif info.entityType ~= nil then
+        return nil, "INVALID_ENTITY"
+    end
+
+    if info.description ~= nil and type(info.description) ~= "string" then
+        return nil, "INVALID_VALUE"
+    end
+
+    if info.unit ~= nil and type(info.unit) ~= "string" then
+        return nil, "INVALID_VALUE"
+    end
+
+    if info.category ~= nil and type(info.category) ~= "string" then
+        return nil, "INVALID_VALUE"
+    end
+
+    if info.categoryLabel ~= nil and type(info.categoryLabel) ~= "string" then
+        return nil, "INVALID_VALUE"
+    end
+
+    return true
+end
+
+local function isCompatibleFieldInfo(existingInfo, newInfo)
+    if existingInfo.label ~= newInfo.label
+        or existingInfo.type ~= newInfo.type
+        or existingInfo.scope ~= newInfo.scope
+    then
+        return false
+    end
+
+    if existingInfo.scope == "entity" and existingInfo.entityType ~= newInfo.entityType then
+        return false
+    end
+
+    local optionalKeys = {
+        "description",
+        "unit",
+        "category",
+        "categoryLabel",
+    }
+
+    for index = 1, #optionalKeys do
+        local key = optionalKeys[index]
+
+        if newInfo[key] ~= nil and existingInfo[key] ~= newInfo[key] then
+            return false
+        end
+    end
+
+    return true
+end
+
 function lib:RegisterProvider(providerID, info)
     if not isValidProviderID(providerID) then
         return nil, "INVALID_PROVIDER_ID"
@@ -147,6 +271,9 @@ function lib:RegisterProvider(providerID, info)
     state.providers[providerID] = provider
     state.providerInfo[providerID] = copyTable(info)
     state.providerOrder[#state.providerOrder + 1] = providerID
+    state.fields[providerID] = {}
+    state.fieldInfo[providerID] = {}
+    state.fieldOrder[providerID] = {}
 
     return provider, nil
 end
@@ -178,6 +305,97 @@ function lib:IterateProviders()
         end
 
         return providerID, state.providers[providerID]
+    end
+end
+
+function providerMethods:RegisterField(fieldID, info)
+    local providerID = self._lbdProviderID
+
+    if state.providers[providerID] ~= self then
+        return nil, "UNKNOWN_PROVIDER"
+    end
+
+    if not isValidFieldID(fieldID) then
+        return nil, "INVALID_FIELD_ID"
+    end
+
+    local valid, err = validateFieldInfo(info)
+
+    if not valid then
+        return nil, err
+    end
+
+    local fields = state.fields[providerID]
+    local fieldInfo = state.fieldInfo[providerID]
+    local fieldOrder = state.fieldOrder[providerID]
+    local field = fields[fieldID]
+
+    if field ~= nil then
+        local existingInfo = fieldInfo[fieldID]
+
+        if not isCompatibleFieldInfo(existingInfo, info) then
+            return nil, "FIELD_CONFLICT"
+        end
+
+        return field, nil
+    end
+
+    field = setmetatable({
+        _lbdProviderID = providerID,
+        _lbdFieldID = fieldID,
+    }, fieldMetatable)
+
+    fields[fieldID] = field
+    fieldInfo[fieldID] = copyTable(info)
+    fieldOrder[#fieldOrder + 1] = fieldID
+
+    return field, nil
+end
+
+function lib:GetField(providerID, fieldID)
+    if not isValidProviderID(providerID) then
+        return nil, "INVALID_PROVIDER_ID"
+    end
+
+    if state.providers[providerID] == nil then
+        return nil, "UNKNOWN_PROVIDER"
+    end
+
+    if not isValidFieldID(fieldID) then
+        return nil, "INVALID_FIELD_ID"
+    end
+
+    local fields = state.fields[providerID]
+    local field = fields and fields[fieldID] or nil
+
+    if field == nil then
+        return nil, "UNKNOWN_FIELD"
+    end
+
+    return field, nil
+end
+
+function lib:IterateFields(providerID)
+    if not isValidProviderID(providerID) or state.providers[providerID] == nil then
+        return function()
+            return nil
+        end
+    end
+
+    local order = state.fieldOrder[providerID]
+    local fields = state.fields[providerID]
+    local index = 0
+
+    return function()
+        index = index + 1
+
+        local fieldID = order[index]
+
+        if fieldID == nil then
+            return nil
+        end
+
+        return fieldID, fields[fieldID]
     end
 end
 
