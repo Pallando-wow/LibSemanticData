@@ -1,7 +1,7 @@
 # LibBrokerData-1.0 Specification
 
-**Status:** Draft 0.3  
-**Library ID:** `LibBrokerData-1.0`  
+**Status:** Draft 0.5
+**Library ID:** `LibBrokerData-1.0`
 **Repository:** `LibBrokerData`
 
 ## 1. Purpose
@@ -138,7 +138,6 @@ A future incompatible API may use a separate global identity such as:
 _G["LibBrokerData-2.0"]
 ```
 
-The exact in-place upgrade behavior remains to be finalized before implementation.
 
 ## 6. Provider
 
@@ -199,7 +198,6 @@ A compatible duplicate registration may return the existing Provider.
 
 An incompatible redefinition is a conflict.
 
-The exact conflict return behavior remains to be finalized before implementation.
 
 ## 7. Field
 
@@ -515,9 +513,16 @@ Optionally:
 }
 ```
 
-Progress tables are treated as immutable values.
+Progress tables are logical immutable value snapshots.
 
-Producers must publish a new table when changing progress data.
+Normative rules:
+
+- Producers must publish a new table when changing progress data.
+- LibBrokerData must not keep a Producer-owned progress table as mutable shared state.
+- The library must capture the submitted progress value as library-owned state.
+- A Producer may mutate or reuse its original input table after `SetValue()` or `SetValues()` returns without changing LibBrokerData's stored value.
+- Consumers must treat progress tables returned by LibBrokerData as read-only.
+- A later value update must not mutate an older progress snapshot that was already returned or delivered in a callback.
 
 ## 11. Nil and unavailable data
 
@@ -531,7 +536,7 @@ A consumer decides whether to hide the value, show a placeholder, hide a complet
 
 ## 12. Producer API
 
-The initial Producer API is intended to include:
+The Producer API for 1.0 includes:
 
 ```lua
 LBD:RegisterProvider(providerID, info)
@@ -548,7 +553,7 @@ provider:SetValues(values)
 
 `RegisterField` returns a Field object.
 
-The concrete public return signatures remain to be finalized before implementation.
+The public return signatures for 1.0 are defined below.
 
 ### 12.1 SetValue without Entity
 
@@ -574,23 +579,324 @@ For a Field registered with `scope = "entity"`, omitting the Entity is invalid. 
 
 ### 12.3 Atomic SetValues
 
-`SetValues()` is intended for updating several logically related values as one operation.
+`SetValues()` updates several values as one atomic operation.
+
+The input is an array of update records.
+
+Example:
+
+```lua
+provider:SetValues({
+    {
+        fieldID = "realmGold",
+        value = 14244856,
+    },
+
+    {
+        fieldID = "characterGold",
+        value = 5639221,
+        entity = {
+            entityType = "character",
+            entityID = "Player-1234-0000ABCD",
+            entityLabel = "Pitronas",
+        },
+    },
+
+    {
+        fieldID = "characterGold",
+        value = 4250000,
+        entity = {
+            entityType = "character",
+            entityID = "Player-1234-0000EF01",
+            entityLabel = "Temlin",
+        },
+    },
+})
+```
+
+Each update record contains:
+
+| Key | Required | Meaning |
+| --- | --- | --- |
+| `fieldID` | yes | target Field |
+| `value` | no | new value; omitted or `nil` means unavailable/remove current value |
+| `entity` | depends on scope | required for `scope = "entity"`, forbidden for `scope = "single"` |
 
 Required behavior:
 
-1. validate all submitted updates
-2. apply all valid changes
-3. update Entity metadata where applicable
-4. emit one consolidated change notification afterward
-5. never expose a partially updated logical set through the change event
+1. validate the complete batch before applying any change
+2. reject the complete batch if any update is invalid
+3. apply all valid changes only after successful validation
+4. update Entity metadata where applicable
+5. emit at most one consolidated `EVENT_VALUES_CHANGED` event afterward
+6. never expose a partially updated logical set through the change event
 
-`SetValues()` may therefore produce multiple entries in one `EVENT_VALUES_CHANGED` payload.
+For `scope = "single"` the target identity is:
 
-The final concrete input structure for `SetValues()` remains to be finalized before implementation.
+```text
+fieldID
+```
 
-## 13. Consumer API
+For `scope = "entity"` the target identity is:
 
-The initial Consumer API is intended to include:
+```text
+fieldID + entityType + entityID
+```
+
+The same target may occur only once in one `SetValues()` batch.
+
+A duplicate target in the same batch is rejected with:
+
+```text
+DUPLICATE_UPDATE
+```
+
+For a `scope = "single"` Field, a missing or `nil` value marks the current value as unavailable.
+
+For a `scope = "entity"` Field, a missing or `nil` value removes the current value for the specified Entity.
+
+Entity identity remains known only while a current value exists unless the Producer publishes that Entity again later.
+
+`SetValues()` returns the number of effective changes made.
+
+If validation fails, no change is applied.
+
+## 13. Public return signatures
+
+The public API uses explicit return values for normal validation and lookup failures.
+
+### 13.1 Registration
+
+```lua
+LBD:RegisterProvider(providerID, info)
+→ provider, err
+```
+
+```lua
+provider:RegisterField(fieldID, info)
+→ field, err
+```
+
+On success:
+
+```text
+object, nil
+```
+
+On failure:
+
+```text
+nil, ERROR_CODE
+```
+
+### 13.2 Value updates
+
+```lua
+provider:SetValue(fieldID, value)
+provider:SetValue(fieldID, value, entity)
+→ changed, err
+```
+
+On success:
+
+```text
+true, nil
+```
+
+if an effective value or Entity metadata change occurred, otherwise:
+
+```text
+false, nil
+```
+
+On failure:
+
+```text
+nil, ERROR_CODE
+```
+
+`SetValues()` returns:
+
+```lua
+provider:SetValues(updates)
+→ changedCount, err
+```
+
+On success, `changedCount` is the number of effective change records generated.
+
+On validation failure:
+
+```text
+nil, ERROR_CODE
+```
+
+and no changes are applied.
+
+### 13.3 Lookups
+
+```lua
+LBD:GetProvider(providerID)
+→ provider, err
+```
+
+```lua
+LBD:GetField(providerID, fieldID)
+→ field, err
+```
+
+For values:
+
+```lua
+LBD:GetValue(providerID, fieldID)
+LBD:GetValue(providerID, fieldID, entityType, entityID)
+→ value, entity, err
+```
+
+For a Field with `scope = "single"`:
+
+```lua
+LBD:GetValue(providerID, fieldID)
+```
+
+is valid and returns:
+
+```text
+value, nil, nil
+```
+
+If Entity arguments are supplied for a `single` Field, the call returns:
+
+```text
+nil, nil, ENTITY_NOT_ALLOWED
+```
+
+For a Field with `scope = "entity"`:
+
+```lua
+LBD:GetValue(providerID, fieldID, entityType, entityID)
+```
+
+is required.
+
+If the Entity arguments are omitted, the call returns:
+
+```text
+nil, nil, ENTITY_REQUIRED
+```
+
+If `entityType` does not match the Field's declared Entity type, the call returns:
+
+```text
+nil, nil, ENTITY_TYPE_MISMATCH
+```
+
+If the Entity identity is malformed, the call returns:
+
+```text
+nil, nil, INVALID_ENTITY
+```
+
+For an existing Entity-scoped value, the result is:
+
+```text
+value, entitySnapshot, nil
+```
+
+If a valid Field and valid Entity identity currently have no value, the result is:
+
+```text
+nil, nil, nil
+```
+
+A valid but currently absent Entity is therefore not an API error.
+
+For an invalid Provider or Field lookup:
+
+```text
+nil, nil, ERROR_CODE
+```
+
+### 13.4 Iterators
+
+Iterator functions return iterators only and do not return normal API error codes.
+
+The signatures are:
+
+```lua
+for providerID, provider in LBD:IterateProviders() do
+    ...
+end
+```
+
+```lua
+for fieldID, field in LBD:IterateFields(providerID) do
+    ...
+end
+```
+
+```lua
+for value, entity in LBD:IterateValues(providerID, fieldID) do
+    ...
+end
+```
+
+An unknown Provider or Field produces an empty iterator.
+
+### 13.5 Callbacks
+
+```lua
+LBD:RegisterCallback(event, callback)
+→ token, err
+```
+
+On success:
+
+```text
+token, nil
+```
+
+The token is opaque to the Consumer.
+
+Unsupported events return:
+
+```text
+nil, INVALID_EVENT
+```
+
+A non-callable callback returns:
+
+```text
+nil, INVALID_CALLBACK
+```
+
+Callback removal uses:
+
+```lua
+LBD:UnregisterCallback(token)
+→ removed, err
+```
+
+If the token was registered and removed:
+
+```text
+true, nil
+```
+
+If the token is well-formed but is no longer registered:
+
+```text
+false, nil
+```
+
+An invalid token representation returns:
+
+```text
+nil, INVALID_CALLBACK_TOKEN
+```
+
+## 14. Consumer API
+
+The Consumer API for 1.0 includes:
 
 ```lua
 LBD:GetProvider(providerID)
@@ -605,7 +911,7 @@ LBD:IterateValues(providerID, fieldID)
 
 Consumers must be able to discover Providers and Fields regardless of load order.
 
-## 14. IterateValues
+## 15. IterateValues
 
 `IterateValues(providerID, fieldID)` returns:
 
@@ -615,7 +921,7 @@ for value, entity in LBD:IterateValues(providerID, fieldID) do
 end
 ```
 
-For an unscoped value:
+For a `single` Field with a current value:
 
 ```lua
 value = 14244856
@@ -636,27 +942,39 @@ entity = {
 
 The Entity table keeps Entity metadata together and allows future optional metadata to be added without changing the iterator signature.
 
-Consumers must treat returned Entity tables as read-only.
+Consumers must treat returned Entity tables and table-valued values as read-only.
 
-The library may replace an Entity metadata table when metadata changes.
+`IterateValues()` returns only currently available values.
 
-Entity-scoped values are iterated in first-seen Entity order.
+A `nil` value is never yielded because `nil` in the iterator's first return position would terminate Lua iteration.
 
-## 15. Registration and iteration order
+Removing or marking a value unavailable therefore removes it from `IterateValues()` output.
+
+For Entity-scoped Fields:
+
+- values are iterated in first-seen order
+- changing a value does not change its position
+- changing Entity metadata does not change its position
+- removing an Entity-scoped value removes that Entity from the current order
+- publishing the same `entityType + entityID` again after removal appends it to the end as newly seen
+
+## 16. Registration and iteration order
 
 `IterateProviders()` preserves Provider registration order.
 
 `IterateFields()` preserves Field registration order.
 
-`IterateValues()` preserves first-seen Entity order for Entity-scoped values.
+`IterateValues()` preserves current first-seen Entity order for Entity-scoped values.
+
+Removal deletes the Entity from that order. If the same Entity is published again later, it is appended to the end as newly seen.
 
 Consumers remain free to apply their own sorting.
 
-## 16. Events and callbacks
+## 17. Events and callbacks
 
 LibBrokerData provides its own callback system.
 
-The initial public API is intended to include:
+The callback API for 1.0 includes:
 
 ```lua
 local token = LBD:RegisterCallback(event, callback)
@@ -674,19 +992,19 @@ LBD.EVENT_FIELD_REGISTERED
 LBD.EVENT_VALUES_CHANGED
 ```
 
-### 16.1 Provider registered
+### 17.1 Provider registered
 
 ```lua
 callback(providerID, provider)
 ```
 
-### 16.2 Field registered
+### 17.2 Field registered
 
 ```lua
 callback(providerID, fieldID, field)
 ```
 
-### 16.3 Values changed
+### 17.3 Values changed
 
 The callback signature is:
 
@@ -762,26 +1080,97 @@ changes = {
 }
 ```
 
-### 16.4 VALUES_CHANGED rules
+### 17.4 Entity change cases
+
+For an Entity-scoped value, the four relevant change shapes are:
+
+New Entity-scoped value:
+
+```lua
+oldValue = nil
+newValue = 5639221
+oldEntity = nil
+newEntity = {
+    entityType = "character",
+    entityID = "Player-1234-0000ABCD",
+    entityLabel = "Pitronas",
+}
+```
+
+Existing Entity-scoped value changed:
+
+```lua
+oldValue = 5500000
+newValue = 5639221
+oldEntity = {
+    entityType = "character",
+    entityID = "Player-1234-0000ABCD",
+    entityLabel = "Pitronas",
+}
+newEntity = {
+    entityType = "character",
+    entityID = "Player-1234-0000ABCD",
+    entityLabel = "Pitronas",
+}
+```
+
+Entity metadata-only change:
+
+```lua
+oldValue = 5639221
+newValue = 5639221
+oldEntity = {
+    entityType = "character",
+    entityID = "Player-1234-0000ABCD",
+    entityLabel = "Pitronas",
+}
+newEntity = {
+    entityType = "character",
+    entityID = "Player-1234-0000ABCD",
+    entityLabel = "Pitronas-NewName",
+}
+```
+
+Entity-scoped value removed:
+
+```lua
+oldValue = 5639221
+newValue = nil
+oldEntity = {
+    entityType = "character",
+    entityID = "Player-1234-0000ABCD",
+    entityLabel = "Pitronas",
+}
+newEntity = nil
+```
+
+For `scope = "single"` Fields, both `oldEntity` and `newEntity` are always `nil`. Creation, update, and removal are represented only through `oldValue` and `newValue`.
+
+### 17.5 VALUES_CHANGED rules
 
 The following rules are normative:
 
 - `fieldID` is always present.
-- `oldValue` is the previous effective value.
-- `newValue` is the new effective value.
-- `oldEntity` and `newEntity` are `nil` for unscoped values.
-- Entity-scoped changes contain Entity metadata.
-- `entityType` and `entityID` identify the Entity.
+- `oldValue` is the previous effective value snapshot.
+- `newValue` is the new effective value snapshot.
+- `oldEntity` and `newEntity` are `nil` for `scope = "single"` values.
+- For a newly created Entity-scoped value, `oldEntity` is `nil` and `newEntity` is the new Entity snapshot.
+- For a removed Entity-scoped value, `oldEntity` is the previous Entity snapshot and `newEntity` is `nil`.
+- For an existing Entity-scoped value, both Entity snapshots are present unless creation or removal is being represented.
+- `entityType` and `entityID` identify an Entity.
 - Entity metadata may change without changing Entity identity.
 - `SetValues()` may produce multiple change records in one event.
-- No change record is produced when neither effective value nor Entity metadata changed.
-- An Entity metadata-only change produces a change record even when `oldValue == newValue`.
+- No change record is produced when neither the effective value nor Entity metadata changed.
+- An Entity metadata-only change produces a change record even when `oldValue` and `newValue` are equal.
 - Consumers must be able to determine whether a displayed source reference is affected without rereading the complete Provider.
-- After the callback begins, normal getters and iterators must expose the new state.
+- After the callback begins, normal getters and iterators expose the new state.
+- Consumers must treat `oldValue`, `newValue`, `oldEntity`, and `newEntity` table values as read-only snapshots.
+- A later library update must never mutate table-valued snapshots already delivered in an earlier callback.
+- A Producer's later mutation of an input table passed to `SetValue()` or `SetValues()` must not alter stored values or callback snapshots.
 
 Using `oldEntity` and `newEntity` rather than flattening Entity metadata keeps the callback format extensible if optional Entity metadata is added later.
 
-### 16.5 Entity snapshot semantics
+### 17.6 Entity snapshot semantics
 
 `oldEntity` and `newEntity` are logical read-only snapshots.
 
@@ -796,9 +1185,13 @@ Normative rules:
 - Producers must not treat Entity tables passed to `SetValue()` or `SetValues()` as shared mutable library state. The library owns its stored Entity metadata after the call.
 - The implementation must not depend on a Producer keeping its input Entity table unchanged after the call.
 
-The library should implement Entity metadata with replacement semantics rather than mutating a previously published Entity metadata table in place. This guarantees that old callback snapshots remain stable across later metadata changes.
+The library must implement Entity metadata with snapshot/replacement semantics rather than mutating a previously published Entity metadata table in place.
 
-## 17. Callback isolation
+The library must capture Producer-supplied Entity metadata as library-owned state. A Producer may mutate or reuse its original Entity table after `SetValue()` or `SetValues()` returns without changing the Entity metadata stored by LibBrokerData.
+
+This guarantees that old callback snapshots remain stable across later metadata changes.
+
+## 18. Callback isolation
 
 A failing consumer must not prevent remaining callbacks from running.
 
@@ -806,7 +1199,7 @@ Callbacks are isolated from one another.
 
 The implementation should use WoW-compatible protected error handling.
 
-## 18. Load order
+## 19. Load order
 
 The library must support both directions.
 
@@ -830,44 +1223,140 @@ Consumer loads
 
 No fixed addon load order is part of the specification.
 
-## 19. Duplicate registration
+## 20. Duplicate registration
 
-Provider and Field registration must be idempotent when the repeated registration is compatible.
+Provider and Field registration is idempotent when repeated registration is compatible.
 
 Registering the same Provider ID again:
 
-- must not create a second Provider
-- must not discard values
-- must not duplicate the registration event
-- must return the existing Provider when compatible
+- does not create a second Provider
+- does not discard values
+- does not duplicate the registration event
+- returns the existing Provider
 
 Registering the same Field ID again under the same Provider follows the same principle.
 
-An incompatible semantic redefinition is a conflict.
+Optional metadata may be omitted in a duplicate registration.
 
-The exact return behavior and conflict rules remain to be finalized before implementation.
+If an optional metadata key is supplied again, it must match the original registered value.
 
-## 20. Errors
+Provider compatibility checks use the standardized Provider metadata:
+
+```text
+label
+description
+addon
+```
+
+Field compatibility checks use the standardized semantic Field metadata:
+
+```text
+label
+description
+type
+scope
+entityType
+unit
+category
+categoryLabel
+```
+
+Changing `type`, `scope`, or `entityType` is always incompatible.
+
+An incompatible Provider registration returns:
+
+```text
+nil, PROVIDER_CONFLICT
+```
+
+An incompatible Field registration returns:
+
+```text
+nil, FIELD_CONFLICT
+```
+
+The existing registration is not modified.
+
+## 21. Embedded MINOR revision upgrade behavior
+
+Multiple addons may embed different implementation revisions of `LibBrokerData-1.0`.
+
+Example:
+
+```text
+Addon A → MINOR 3
+Addon B → MINOR 5
+Addon C → MINOR 2
+```
+
+The first loaded revision initializes the shared global library table.
+
+When a newer MINOR revision loads, it upgrades the existing library in place.
+
+The following state must be preserved:
+
+- Provider registry
+- Field registry
+- current values
+- Entity metadata
+- callbacks
+- Provider registration order
+- Field registration order
+- current first-seen Entity order
+- existing Provider object identity
+- existing Field object identity
+- the existing global library table identity
+
+The global table:
+
+```lua
+_G["LibBrokerData-1.0"]
+```
+
+must never be replaced during a compatible MINOR upgrade.
+
+A newer implementation may replace or add library methods and perform backward-compatible internal state migrations.
+
+The new `lib.MINOR` value is assigned only after the upgrade and any required migration complete successfully.
+
+If an equal or newer MINOR revision is already loaded, an older embedded copy performs no downgrade and leaves the current implementation untouched.
+
+All MINOR revisions within `LibBrokerData-1.0` must remain backward-compatible with the public 1.0 specification.
+
+## 22. Errors
 
 The public API should prefer explicit return values over intentionally raising Lua errors for normal validation failures.
 
-Stable error identifiers should include at least:
+Stable error identifiers for 1.0 include:
 
 ```text
 INVALID_PROVIDER_ID
 UNKNOWN_PROVIDER
+
 INVALID_FIELD_ID
 UNKNOWN_FIELD
 INVALID_FIELD_TYPE
+
 INVALID_VALUE
+
 INVALID_ENTITY
+ENTITY_REQUIRED
+ENTITY_NOT_ALLOWED
+ENTITY_TYPE_MISMATCH
+
+DUPLICATE_UPDATE
+
+INVALID_EVENT
+INVALID_CALLBACK
+INVALID_CALLBACK_TOKEN
+
 PROVIDER_CONFLICT
 FIELD_CONFLICT
 ```
 
-Exact return signatures remain to be finalized before implementation.
+Normal validation failures return these identifiers rather than intentionally raising Lua errors.
 
-## 21. Current context is consumer logic
+## 23. Current context is consumer logic
 
 LibBrokerData does not define special semantics such as:
 
@@ -899,7 +1388,7 @@ and select the matching Entity itself.
 
 This behavior belongs to the consumer, not LibBrokerData.
 
-## 22. Non-normative Broker Panels reference example
+## 24. Non-normative Broker Panels reference example
 
 A consumer such as Broker Panels may internally refer to a fixed Entity approximately like this:
 
@@ -945,7 +1434,7 @@ entityID
 entityLabel
 ```
 
-## 23. LibDataBroker independence
+## 25. LibDataBroker independence
 
 LibBrokerData does not replace LibDataBroker.
 
@@ -980,7 +1469,7 @@ A consumer may use both systems in parallel.
 
 Neither library depends on the other.
 
-## 24. No formatting
+## 26. No formatting
 
 LibBrokerData never converts semantic data into final display strings.
 
@@ -994,7 +1483,7 @@ duration: 3665
 
 A consumer decides how these values appear.
 
-## 25. No UI semantics
+## 27. No UI semantics
 
 LibBrokerData does not define:
 
@@ -1011,7 +1500,7 @@ LibBrokerData does not define:
 
 A `status` value such as `warning` does not imply a specific color.
 
-## 26. Persistence
+## 28. Persistence
 
 LibBrokerData stores no SavedVariables and has no persistence responsibility.
 
@@ -1021,7 +1510,7 @@ A Consumer owns its configuration.
 
 LibBrokerData only exposes current runtime data.
 
-## 27. Relationship to other WoW libraries
+## 29. Relationship to other WoW libraries
 
 LibBrokerData is an independent implementation.
 
@@ -1037,7 +1526,7 @@ It is not a fork or derivative implementation of LibDataBroker, DataStore, LibDo
 
 No third-party source code is required for its implementation.
 
-## 28. Out of scope for 1.0
+## 30. Out of scope for 1.0
 
 The initial specification intentionally excludes:
 
@@ -1057,7 +1546,7 @@ The initial specification intentionally excludes:
 - current-character/current-realm/current-guild/current-pet semantics
 - display recommendations for specific consumers
 
-## 29. Example: MyAccountant
+## 31. Example: MyAccountant
 
 ```lua
 local LBD = _G["LibBrokerData-1.0"]
@@ -1101,7 +1590,7 @@ provider:SetValue("characterGold", 4213345, {
 
 A consumer can display those values freely or combine them with Fields from entirely different Providers.
 
-## 30. Repository structure
+## 32. Repository structure
 
 Recommended initial structure:
 
@@ -1117,17 +1606,29 @@ LibBrokerData/
 
 Only the runtime library directory needs to be embedded into normal addons.
 
-## 31. Remaining 1.0 decisions before implementation
+## 33. 1.0 specification status
 
-Before the first implementation, the following points still need to be finalized:
+Draft 0.5 incorporates the full pre-implementation consistency review and defines the structural and technical core required for the first implementation:
 
-1. concrete `SetValues()` input structure
-2. concrete public API return signatures
-3. exact library revision upgrade behavior
-4. exact conflict behavior for incompatible duplicate registration
+- Provider and Field identity
+- Field scope
+- Entity identity and metadata
+- semantic value types
+- `SetValue()` semantics
+- atomic `SetValues()` input and behavior
+- public return signatures
+- iterator signatures and ordering behavior
+- callback registration and removal signatures
+- `EVENT_VALUES_CHANGED` payload
+- Entity and table-valued Value snapshot semantics
+- `GetValue()` scope validation
+- duplicate registration behavior
+- conflict handling
+- embedded MINOR upgrade behavior
+- independence from UI, consumers, and LibDataBroker
 
-The `EVENT_VALUES_CHANGED` payload, `IterateValues()` return shape, Field scope rules, Entity type declaration, and Entity snapshot semantics are defined by Draft 0.3 and should no longer be considered open unless implementation testing reveals a concrete problem.
+No further structural API issue is currently known. Implementation may begin after this Draft 0.5 review is accepted.
 
 ---
 
-This specification remains a draft until the remaining 1.0 decisions have been finalized and the first implementation has been tested.
+This specification remains a draft until Draft 0.5 is accepted and the first implementation has been tested.
