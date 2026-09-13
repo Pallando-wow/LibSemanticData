@@ -1,6 +1,6 @@
 # LibBrokerData-1.0 Specification
 
-**Status:** Draft 0.2  
+**Status:** Draft 0.3  
 **Library ID:** `LibBrokerData-1.0`  
 **Repository:** `LibBrokerData`
 
@@ -211,6 +211,8 @@ Example:
 provider:RegisterField("characterGold", {
     label = "Character Gold",
     type = "money",
+    scope = "entity",
+    entityType = "character",
 })
 ```
 
@@ -226,6 +228,8 @@ Supported Field metadata for 1.0:
 | --- | --- | --- |
 | `label` | yes | localized field name |
 | `type` | yes | semantic data type |
+| `scope` | yes | value scope: `single` or `entity` |
+| `entityType` | required for `scope = "entity"` | expected Entity type |
 | `description` | no | localized description |
 | `unit` | no | semantic unit |
 | `category` | no | stable technical group ID |
@@ -233,25 +237,64 @@ Supported Field metadata for 1.0:
 
 Unknown metadata keys must be tolerated.
 
-### 7.2 Field metadata immutability
+### 7.2 Field scope
+
+Every Field must declare its value scope at registration time.
+
+Allowed values are:
+
+```text
+single
+entity
+```
+
+For a single-value Field:
+
+```lua
+provider:RegisterField("realmGold", {
+    label = "Realm Gold",
+    type = "money",
+    scope = "single",
+})
+```
+
+Normative rules for `scope = "single"`:
+
+- the Field has exactly one unscoped value slot
+- `SetValue(fieldID, value)` is valid
+- `SetValue(fieldID, value, entity)` is invalid
+- `entityType` metadata is not allowed for the Field
+
+For an Entity-scoped Field:
+
+```lua
+provider:RegisterField("characterGold", {
+    label = "Character Gold",
+    type = "money",
+    scope = "entity",
+    entityType = "character",
+})
+```
+
+Normative rules for `scope = "entity"`:
+
+- all values are Entity-scoped
+- `entityType` is required at Field registration
+- `SetValue(fieldID, value, entity)` is valid when `entity.entityType` matches the Field's declared `entityType`
+- `SetValue(fieldID, value)` without an Entity is invalid
+- Entities of another type are invalid for that Field
+
+Requiring `entityType` for Entity-scoped Fields allows Consumers to understand the shape of a Field before the first value exists. It also allows Consumers to provide their own context-specific selection logic, such as selecting the current character, without adding that logic to LibBrokerData.
+
+### 7.3 Field metadata immutability
 
 After successful registration, Field metadata is immutable for the remainder of the current session.
 
 A compatible duplicate registration may return the existing Field.
 
-Changing the semantic meaning of a Field, for example from:
+Changing the semantic meaning of a Field is a conflict. This includes changing its `type`, `scope`, or declared `entityType`.
 
-```text
-money
-```
-
-to:
-
-```text
-text
-```
-
-is a conflict.
+For example, changing a Field from `money` to `text`, from `single` to `entity`, or from `entityType = "character"` to another Entity type is incompatible.
 
 ## 8. Entities
 
@@ -338,7 +381,9 @@ Consumers must be notified through `EVENT_VALUES_CHANGED`.
 
 ## 9. Values
 
-A Field can publish an unscoped value or Entity-scoped values.
+A Field publishes values according to its declared `scope`.
+
+A `single` Field publishes one unscoped value. An `entity` Field publishes zero or more values scoped to Entities of its declared `entityType`.
 
 Examples:
 
@@ -507,9 +552,13 @@ The concrete public return signatures remain to be finalized before implementati
 
 ### 12.1 SetValue without Entity
 
+For a Field registered with `scope = "single"`:
+
 ```lua
 provider:SetValue("realmGold", 14244856)
 ```
+
+Passing an Entity for a `single` Field is invalid.
 
 ### 12.2 SetValue with Entity
 
@@ -520,6 +569,8 @@ provider:SetValue("characterGold", 5639221, {
     entityLabel = "Pitronas",
 })
 ```
+
+For a Field registered with `scope = "entity"`, omitting the Entity is invalid. The supplied `entityType` must match the Field's declared `entityType`.
 
 ### 12.3 Atomic SetValues
 
@@ -729,6 +780,23 @@ The following rules are normative:
 - After the callback begins, normal getters and iterators must expose the new state.
 
 Using `oldEntity` and `newEntity` rather than flattening Entity metadata keeps the callback format extensible if optional Entity metadata is added later.
+
+### 16.5 Entity snapshot semantics
+
+`oldEntity` and `newEntity` are logical read-only snapshots.
+
+Normative rules:
+
+- `oldEntity` describes the Entity metadata state before the change.
+- `newEntity` describes the Entity metadata state after the change.
+- A later Entity metadata update must never alter an Entity snapshot that was already delivered in an earlier callback.
+- When Entity metadata changed, `oldEntity` and `newEntity` must not reference the same mutable table.
+- If Entity metadata did not change, an implementation may reuse an equivalent immutable snapshot representation within that change record.
+- Consumers must treat all Entity tables returned by LibBrokerData as read-only.
+- Producers must not treat Entity tables passed to `SetValue()` or `SetValues()` as shared mutable library state. The library owns its stored Entity metadata after the call.
+- The implementation must not depend on a Producer keeping its input Entity table unchanged after the call.
+
+The library should implement Entity metadata with replacement semantics rather than mutating a previously published Entity metadata table in place. This guarantees that old callback snapshots remain stable across later metadata changes.
 
 ## 17. Callback isolation
 
@@ -1002,6 +1070,7 @@ local provider = LBD:RegisterProvider("MyAccountant", {
 provider:RegisterField("realmGold", {
     label = "Realm Gold",
     type = "money",
+    scope = "single",
     category = "balance",
     categoryLabel = "Balance",
 })
@@ -1009,6 +1078,8 @@ provider:RegisterField("realmGold", {
 provider:RegisterField("characterGold", {
     label = "Character Gold",
     type = "money",
+    scope = "entity",
+    entityType = "character",
     category = "balance",
     categoryLabel = "Balance",
 })
@@ -1054,9 +1125,8 @@ Before the first implementation, the following points still need to be finalized
 2. concrete public API return signatures
 3. exact library revision upgrade behavior
 4. exact conflict behavior for incompatible duplicate registration
-5. any additional validation rules required for Field scope and Entity usage
 
-The `EVENT_VALUES_CHANGED` payload and `IterateValues()` return shape are defined by Draft 0.2 and should no longer be considered open unless implementation testing reveals a concrete problem.
+The `EVENT_VALUES_CHANGED` payload, `IterateValues()` return shape, Field scope rules, Entity type declaration, and Entity snapshot semantics are defined by Draft 0.3 and should no longer be considered open unless implementation testing reveals a concrete problem.
 
 ---
 
