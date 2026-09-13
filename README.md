@@ -85,15 +85,71 @@ LibBrokerData
 
 Consumers such as [Broker Panels](https://github.com/Pallando-wow/BrokerPanels) may use both systems side by side.
 
+## Quick start
+
+```lua
+local LBD = _G["LibBrokerData-1.0"]
+
+local provider, err = LBD:RegisterProvider("ExampleAddon", {
+    label = "Example Addon",
+    addon = "ExampleAddon",
+})
+
+local field
+field, err = provider:RegisterField("characterGold", {
+    label = "Character Gold",
+    type = "money",
+    scope = "entity",
+    entityType = "character",
+})
+
+provider:SetValue("characterGold", 5639221, {
+    entityType = "character",
+    entityID = UnitGUID("player"),
+    entityLabel = UnitName("player"),
+})
+```
+
+A Consumer can discover the Field and its metadata without knowing the Producer in advance:
+
+```lua
+for providerID, currentProvider in LBD:IterateProviders() do
+    for fieldID, currentField in LBD:IterateFields(providerID) do
+        print(
+            providerID,
+            fieldID,
+            currentField.type,
+            currentField.scope,
+            currentField.entityType
+        )
+    end
+end
+```
+
+Registered Provider and Field metadata is exposed through the returned objects as read-only information.
+
 ## Specification
 
 See `SPECIFICATION.md`.
 
 ## Status
 
-LibBrokerData-1.0 is currently in specification and initial implementation design.
+The first complete `LibBrokerData-1.0` core implementation is available as implementation revision `MINOR = 4`.
 
-The public API is not yet considered stable.
+The current implementation covers:
+
+- Provider and Field registration and discovery
+- `single` and `entity` Field scopes
+- typed Values
+- Entity-scoped Values
+- atomic `SetValues()` updates
+- callbacks and change events
+- snapshot semantics
+- compatible embedded-library upgrades and downgrade protection
+
+The current core passed **165/165 automated in-game tests**. See `TEST_STATUS.md`.
+
+The API is still considered a pre-release candidate until the implementation/specification audit and first consumer integration are complete.
 
 ## License
 
