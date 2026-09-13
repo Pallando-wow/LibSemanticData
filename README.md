@@ -83,7 +83,7 @@ LibBrokerData
 → structured individual values
 ```
 
-Consumers such as Broker Panels may use both systems side by side.
+Consumers such as [Broker Panels](https://github.com/Pallando-wow/BrokerPanels) may use both systems side by side.
 
 ## Specification
 
