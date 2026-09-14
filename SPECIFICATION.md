@@ -1703,7 +1703,7 @@ MINOR = 5
 
 The MINOR-5 implementation has been validated with automated in-game tests.
 
-The expanded suite covers Provider/Field discovery, typed Values, `single` and `entity` scopes, atomic batches, callbacks and events, snapshot semantics, ordering, typed Entity identity, large numeric Entity IDs, Boolean `false` change snapshots, strict 1.0 payload validation, MINOR upgrades, migration of existing Entity Values, and downgrade protection.
+Validation covers Provider/Field discovery, typed Values, `single` and `entity` scopes, atomic batches, callbacks and events, snapshot semantics, ordering, typed Entity identity, strict 1.0 payload validation, MINOR upgrades, migration of existing Entity Values, and downgrade protection.
 
 No structural API mismatch is currently known from the implementation/specification audit.
 

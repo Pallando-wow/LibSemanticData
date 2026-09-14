@@ -151,13 +151,6 @@ The current core has been validated with automated in-game tests.
 
 The implementation/specification audit is complete. The API remains a pre-release candidate until the first real Producer/Consumer integration is complete.
 
-The MINOR-5 audit revision fixes two edge cases found during final review:
-
-- Boolean change events preserve `oldValue = false` correctly instead of treating it as unavailable.
-- Entity identity keeps numeric IDs type-safe and collision-free instead of deriving identity only from `tostring(entityID)`.
-
-Entity metadata and `progress` payloads are also validated against the defined 1.0 structure.
-
 ## License
 
 To be decided before the first public release.
