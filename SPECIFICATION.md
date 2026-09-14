@@ -1,6 +1,6 @@
 # LibBrokerData-1.0 Specification
 
-**Status:** Draft 0.7 – implementation candidate
+**Status:** Draft 0.8 – implementation candidate
 **Library ID:** `LibBrokerData-1.0`
 **Repository:** `LibBrokerData`
 
@@ -133,7 +133,7 @@ lib.MINOR = 1
 The first complete core implementation described by this draft uses:
 
 ```lua
-lib.MINOR = 5
+lib.MINOR = 6
 ```
 
 `MINOR` is an implementation revision, not part of the public API identity.
@@ -256,6 +256,7 @@ Supported Field metadata for 1.0:
 | `unit` | no | semantic unit |
 | `category` | no | stable technical group ID |
 | `categoryLabel` | no | localized group label |
+| `origin` | no | structured technical origin reference |
 
 Unknown metadata keys must be tolerated.
 
@@ -334,6 +335,80 @@ A compatible duplicate registration returns the existing Field object.
 Changing the semantic meaning of a Field is a conflict. This includes changing its `type`, `scope`, or declared `entityType`.
 
 For example, changing a Field from `money` to `text`, from `single` to `entity`, or from `entityType = "character"` to another Entity type is incompatible.
+
+### 7.4 Field origin metadata
+
+A Field may optionally declare the technical source from which its value is derived:
+
+```lua
+origin = {
+    sourceType = "...",
+}
+```
+
+`origin` is standardized Field metadata. It describes provenance only. It does not define UI, tooltip, formatting, panel, or Consumer behavior.
+
+General normative rules:
+
+- `origin` is optional.
+- when present, `origin` must be a table
+- `sourceType` is required and must be a non-empty string
+- all `origin` keys must be strings
+- additional origin properties may use string, boolean, or finite number values
+- nested tables, functions, userdata, threads, and non-finite numbers are not part of the 1.0 origin schema
+- unknown `sourceType` values are allowed when these general rules are satisfied
+- `origin` is immutable Field metadata and is exposed through the Field object using the same read-only snapshot behavior as other table-valued metadata
+- no additional event is emitted for `origin`, because Field metadata does not change after registration
+
+#### 7.4.1 LibDataBroker origin
+
+For a Field derived from a classic LibDataBroker DataObject:
+
+```lua
+origin = {
+    sourceType = "LibDataBroker-1.1",
+    sourceID = "AzerothDeedsInspector",
+    attribute = "text",
+}
+```
+
+Normative rules:
+
+- `sourceID` is required and must be a non-empty string
+- `sourceID` is the exact technical LibDataBroker DataObject name, not a display label
+- no LibBrokerData technical-ID regular expression is applied to `sourceID`; valid DataObject names may contain spaces, for example `Hunter Threat`
+- `attribute` is optional; when present it must be a non-empty string
+- common aggregator attributes include `text` and `value`, but LibBrokerData does not restrict the property to those names
+
+#### 7.4.2 LibBrokerData origin
+
+For a Field derived from another LibBrokerData Field:
+
+```lua
+origin = {
+    sourceType = "LibBrokerData-1.0",
+    providerID = "SomeProvider",
+    fieldID = "someField",
+}
+```
+
+Normative rules:
+
+- `providerID` is required and must satisfy the normal LibBrokerData Provider-ID rules
+- `fieldID` is required and must satisfy the normal LibBrokerData Field-ID rules
+- the reference identifies the technical source Field only; it does not imply a current Entity, display line, formatting rule, or other Consumer context
+
+#### 7.4.3 Duplicate registration compatibility
+
+`origin` participates in standardized Field compatibility checks.
+
+A duplicate Field registration may omit `origin`, like other optional metadata. When `origin` is supplied again, the complete structured origin must be deep-equal to the originally registered value. A different origin is incompatible and returns:
+
+```text
+nil, FIELD_CONFLICT
+```
+
+The Producer-supplied origin table is copied at registration. Mutating that input table later must not modify registered metadata. A table returned through `field.origin` is likewise a snapshot; mutating it must not modify the registered origin.
 
 ## 8. Entities
 
@@ -1342,6 +1417,7 @@ entityType
 unit
 category
 categoryLabel
+origin
 ```
 
 Changing `type`, `scope`, or `entityType` is always incompatible.
@@ -1439,7 +1515,7 @@ FIELD_CONFLICT
 
 Normal validation failures return these identifiers rather than intentionally raising Lua errors.
 
-Malformed Provider or Field metadata that does not have a more specific error code returns `INVALID_VALUE`. Unsupported Field types return `INVALID_FIELD_TYPE`; malformed Entity metadata returns `INVALID_ENTITY`.
+Malformed Provider or Field metadata that does not have a more specific error code returns `INVALID_VALUE`. Unsupported Field types return `INVALID_FIELD_TYPE`; malformed Entity metadata returns `INVALID_ENTITY`. A malformed standardized Field `origin` also returns `INVALID_VALUE`.
 
 ## 23. Current context is consumer logic
 
@@ -1693,17 +1769,17 @@ Only the runtime library directory needs to be embedded into normal addons.
 
 ## 33. 1.0 specification status
 
-Draft 0.7 is the audited implementation-candidate specification for `LibBrokerData-1.0`.
+Draft 0.8 is the implementation-candidate specification for `LibBrokerData-1.0`.
 
 The current implementation revision is:
 
 ```text
-MINOR = 5
+MINOR = 6
 ```
 
-The MINOR-5 implementation has been validated with automated in-game tests.
+The MINOR-6 implementation extends standardized Field metadata with an optional immutable technical origin reference.
 
-Validation covers Provider/Field discovery, typed Values, `single` and `entity` scopes, atomic batches, callbacks and events, snapshot semantics, ordering, typed Entity identity, strict 1.0 payload validation, MINOR upgrades, migration of existing Entity Values, and downgrade protection.
+Validation for earlier revisions covers Provider/Field discovery, typed Values, `single` and `entity` scopes, atomic batches, callbacks and events, snapshot semantics, ordering, typed Entity identity, strict 1.0 payload validation, MINOR upgrades, migration of existing Entity Values, and downgrade protection. MINOR 6 additionally standardizes immutable Field origin metadata while preserving existing MINOR-5 Producers that do not provide `origin`.
 
 No structural API mismatch is currently known from the implementation/specification audit.
 

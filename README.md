@@ -134,11 +134,12 @@ See `SPECIFICATION.md`.
 
 ## Status
 
-The first complete `LibBrokerData-1.0` core implementation is available as implementation revision `MINOR = 5`.
+The first complete `LibBrokerData-1.0` core implementation is available as implementation revision `MINOR = 6`.
 
 The current implementation covers:
 
 - Provider and Field registration and discovery
+- optional standardized Field origin metadata
 - `single` and `entity` Field scopes
 - typed Values
 - Entity-scoped Values
