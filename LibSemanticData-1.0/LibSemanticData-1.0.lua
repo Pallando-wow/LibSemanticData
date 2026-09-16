@@ -1,5 +1,5 @@
-local MAJOR = "LibBrokerData-1.0"
-local MINOR = 5
+local MAJOR = "LibSemanticData-1.0"
+local MINOR = 6
 
 local existing = _G[MAJOR]
 
@@ -189,6 +189,52 @@ local function isCompatibleProviderInfo(current, incoming)
     return true
 end
 
+local function validateOrigin(origin)
+    if type(origin) ~= "table" then
+        return nil, "INVALID_VALUE"
+    end
+
+    if type(origin.sourceType) ~= "string" or origin.sourceType == "" then
+        return nil, "INVALID_VALUE"
+    end
+
+    for key, value in pairs(origin) do
+        if type(key) ~= "string" then
+            return nil, "INVALID_VALUE"
+        end
+
+        local valueType = type(value)
+
+        if valueType == "number" then
+            if not isFiniteNumber(value) then
+                return nil, "INVALID_VALUE"
+            end
+        elseif valueType ~= "string" and valueType ~= "boolean" then
+            return nil, "INVALID_VALUE"
+        end
+    end
+
+    if origin.sourceType == "LibDataBroker-1.1" then
+        if type(origin.sourceID) ~= "string" or origin.sourceID == "" then
+            return nil, "INVALID_VALUE"
+        end
+
+        if origin.attribute ~= nil
+            and (type(origin.attribute) ~= "string" or origin.attribute == "")
+        then
+            return nil, "INVALID_VALUE"
+        end
+    elseif origin.sourceType == "LibSemanticData-1.0" then
+        if not isValidProviderID(origin.providerID)
+            or not isValidFieldID(origin.fieldID)
+        then
+            return nil, "INVALID_VALUE"
+        end
+    end
+
+    return true
+end
+
 local function validateFieldInfo(info)
     if type(info) ~= "table" then
         return nil, "INVALID_VALUE"
@@ -230,6 +276,14 @@ local function validateFieldInfo(info)
         return nil, "INVALID_VALUE"
     end
 
+    if info.origin ~= nil then
+        local valid, originError = validateOrigin(info.origin)
+
+        if not valid then
+            return nil, originError
+        end
+    end
+
     return true
 end
 
@@ -258,6 +312,10 @@ local function isCompatibleFieldInfo(current, incoming)
         if incoming[key] ~= nil and current[key] ~= incoming[key] then
             return false
         end
+    end
+
+    if incoming.origin ~= nil and not deepEqual(current.origin, incoming.origin) then
+        return false
     end
 
     return true
@@ -354,9 +412,9 @@ local function emptyIterator()
     return nil
 end
 
-lib.EVENT_PROVIDER_REGISTERED = "LibBrokerData_ProviderRegistered"
-lib.EVENT_FIELD_REGISTERED = "LibBrokerData_FieldRegistered"
-lib.EVENT_VALUES_CHANGED = "LibBrokerData_ValuesChanged"
+lib.EVENT_PROVIDER_REGISTERED = "LibSemanticData_ProviderRegistered"
+lib.EVENT_FIELD_REGISTERED = "LibSemanticData_FieldRegistered"
+lib.EVENT_VALUES_CHANGED = "LibSemanticData_ValuesChanged"
 
 local supportedEvents = {
     [lib.EVENT_PROVIDER_REGISTERED] = true,
