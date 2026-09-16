@@ -1,4 +1,4 @@
-local MAJOR = "LibBrokerData-1.0"
+local MAJOR = "LibSemanticData-1.0"
 local MINOR = 6
 
 local existing = _G[MAJOR]
@@ -224,7 +224,7 @@ local function validateOrigin(origin)
         then
             return nil, "INVALID_VALUE"
         end
-    elseif origin.sourceType == "LibBrokerData-1.0" then
+    elseif origin.sourceType == "LibSemanticData-1.0" then
         if not isValidProviderID(origin.providerID)
             or not isValidFieldID(origin.fieldID)
         then
@@ -412,9 +412,9 @@ local function emptyIterator()
     return nil
 end
 
-lib.EVENT_PROVIDER_REGISTERED = "LibBrokerData_ProviderRegistered"
-lib.EVENT_FIELD_REGISTERED = "LibBrokerData_FieldRegistered"
-lib.EVENT_VALUES_CHANGED = "LibBrokerData_ValuesChanged"
+lib.EVENT_PROVIDER_REGISTERED = "LibSemanticData_ProviderRegistered"
+lib.EVENT_FIELD_REGISTERED = "LibSemanticData_FieldRegistered"
+lib.EVENT_VALUES_CHANGED = "LibSemanticData_ValuesChanged"
 
 local supportedEvents = {
     [lib.EVENT_PROVIDER_REGISTERED] = true,

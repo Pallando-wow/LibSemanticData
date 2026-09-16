@@ -1,6 +1,6 @@
-# LibBrokerData
+# LibSemanticData
 
-LibBrokerData is a small, dependency-free data library for World of Warcraft addons.
+LibSemanticData is a small, dependency-free data library for World of Warcraft addons.
 
 Its purpose is to let addons publish structured, individually addressable data values that other addons can discover and consume independently of presentation.
 
@@ -8,7 +8,7 @@ Its purpose is to let addons publish structured, individually addressable data v
 
 Classic broker systems are very good at exposing ready-to-display text, icons, and click actions.
 
-LibBrokerData focuses on the values behind that presentation.
+LibSemanticData focuses on the values behind that presentation.
 
 Instead of exposing only:
 
@@ -71,7 +71,7 @@ Provider
 
 ## Relationship to LibDataBroker
 
-LibBrokerData does not replace LibDataBroker.
+LibSemanticData does not replace LibDataBroker.
 
 An addon may support both:
 
@@ -79,7 +79,7 @@ An addon may support both:
 LibDataBroker
 → classic broker presentation
 
-LibBrokerData
+LibSemanticData
 → structured individual values
 ```
 
@@ -88,9 +88,9 @@ Consumers such as [Broker Panels](https://github.com/Pallando-wow/BrokerPanels) 
 ## Quick start
 
 ```lua
-local LBD = _G["LibBrokerData-1.0"]
+local LSD = _G["LibSemanticData-1.0"]
 
-local provider, err = LBD:RegisterProvider("ExampleAddon", {
+local provider, err = LSD:RegisterProvider("ExampleAddon", {
     label = "Example Addon",
     addon = "ExampleAddon",
 })
@@ -113,8 +113,8 @@ provider:SetValue("characterGold", 5639221, {
 A Consumer can discover the Field and its metadata without knowing the Producer in advance:
 
 ```lua
-for providerID, currentProvider in LBD:IterateProviders() do
-    for fieldID, currentField in LBD:IterateFields(providerID) do
+for providerID, currentProvider in LSD:IterateProviders() do
+    for fieldID, currentField in LSD:IterateFields(providerID) do
         print(
             providerID,
             fieldID,
@@ -134,7 +134,7 @@ See `SPECIFICATION.md`.
 
 ## Status
 
-The first complete `LibBrokerData-1.0` core implementation is available as implementation revision `MINOR = 6`.
+The first complete `LibSemanticData-1.0` core implementation is available as implementation revision `MINOR = 6`.
 
 The current implementation covers:
 

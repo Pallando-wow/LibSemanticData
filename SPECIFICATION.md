@@ -1,16 +1,16 @@
-# LibBrokerData-1.0 Specification
+# LibSemanticData-1.0 Specification
 
-**Status:** Draft 0.8 – implementation candidate
-**Library ID:** `LibBrokerData-1.0`
-**Repository:** `LibBrokerData`
+**Status:** Draft 0.9 – implementation candidate
+**Library ID:** `LibSemanticData-1.0`
+**Repository:** `LibSemanticData`
 
 ## 1. Purpose
 
-LibBrokerData is a dependency-free data library for World of Warcraft addons.
+LibSemanticData is a dependency-free data library for World of Warcraft addons.
 
 It allows producer addons to publish structured, individually addressable semantic values that consumer addons can discover and use independently of presentation.
 
-LibBrokerData provides data only.
+LibSemanticData provides data only.
 
 It does not define:
 
@@ -31,7 +31,7 @@ A consumer decides which values are displayed, where they are displayed, how the
 
 ## 2. Design principles
 
-LibBrokerData-1.0:
+LibSemanticData-1.0:
 
 - has no dependency on LibStub
 - has no dependency on CallbackHandler-1.0
@@ -48,11 +48,11 @@ LibBrokerData-1.0:
 - exposes semantic source data rather than presentation-oriented strings
 - remains independent of any specific consumer such as Broker Panels
 
-LibBrokerData may coexist with LibDataBroker. An addon may publish classic LibDataBroker objects and LibBrokerData values at the same time.
+LibSemanticData may coexist with LibDataBroker. An addon may publish classic LibDataBroker objects and LibSemanticData values at the same time.
 
 ## 3. No display semantics
 
-LibBrokerData must not introduce presentation-oriented metadata such as:
+LibSemanticData must not introduce presentation-oriented metadata such as:
 
 ```text
 line1
@@ -118,15 +118,15 @@ Multiple character values are distinguished through Entity identity rather than 
 The public library ID is:
 
 ```lua
-_G["LibBrokerData-1.0"]
+_G["LibSemanticData-1.0"]
 ```
 
-The major API identity remains `LibBrokerData-1.0` while changes stay backward-compatible.
+The major API identity remains `LibSemanticData-1.0` while changes stay backward-compatible.
 
 Internal implementation revisions use a numeric `MINOR` value:
 
 ```lua
-lib.MAJOR = "LibBrokerData-1.0"
+lib.MAJOR = "LibSemanticData-1.0"
 lib.MINOR = 1
 ```
 
@@ -143,7 +143,7 @@ A newer embedded implementation must upgrade the existing global library table i
 A future incompatible API may use a separate global identity such as:
 
 ```lua
-_G["LibBrokerData-2.0"]
+_G["LibSemanticData-2.0"]
 ```
 
 
@@ -154,7 +154,7 @@ A Provider is a logical data source, normally an addon.
 Example:
 
 ```lua
-local provider = LBD:RegisterProvider("MyAccountant", {
+local provider = LSD:RegisterProvider("MyAccountant", {
     label = "MyAccountant",
 })
 ```
@@ -165,7 +165,7 @@ The Provider ID must be:
 
 - stable
 - non-localized
-- unique within LibBrokerData
+- unique within LibSemanticData
 - case-sensitive
 
 Recommended characters:
@@ -207,7 +207,7 @@ The Provider object returned by `RegisterProvider()` and `GetProvider()` exposes
 Example:
 
 ```lua
-local provider = LBD:GetProvider("MyAccountant")
+local provider = LSD:GetProvider("MyAccountant")
 
 print(provider.label)
 print(provider.description)
@@ -307,7 +307,7 @@ Normative rules for `scope = "entity"`:
 - `SetValue(fieldID, value)` without an Entity is invalid
 - Entities of another type are invalid for that Field
 
-Requiring `entityType` for Entity-scoped Fields allows Consumers to understand the shape of a Field before the first value exists. It also allows Consumers to provide their own context-specific selection logic, such as selecting the current character, without adding that logic to LibBrokerData.
+Requiring `entityType` for Entity-scoped Fields allows Consumers to understand the shape of a Field before the first value exists. It also allows Consumers to provide their own context-specific selection logic, such as selecting the current character, without adding that logic to LibSemanticData.
 
 ### 7.3 Field metadata immutability and access
 
@@ -318,7 +318,7 @@ The Field object returned by `RegisterField()` and `GetField()` exposes register
 Example:
 
 ```lua
-local field = LBD:GetField("MyAccountant", "characterGold")
+local field = LSD:GetField("MyAccountant", "characterGold")
 
 print(field.label)
 print(field.type)
@@ -376,17 +376,17 @@ Normative rules:
 
 - `sourceID` is required and must be a non-empty string
 - `sourceID` is the exact technical LibDataBroker DataObject name, not a display label
-- no LibBrokerData technical-ID regular expression is applied to `sourceID`; valid DataObject names may contain spaces, for example `Hunter Threat`
+- no LibSemanticData technical-ID regular expression is applied to `sourceID`; valid DataObject names may contain spaces, for example `Hunter Threat`
 - `attribute` is optional; when present it must be a non-empty string
-- common aggregator attributes include `text` and `value`, but LibBrokerData does not restrict the property to those names
+- common aggregator attributes include `text` and `value`, but LibSemanticData does not restrict the property to those names
 
-#### 7.4.2 LibBrokerData origin
+#### 7.4.2 LibSemanticData origin
 
-For a Field derived from another LibBrokerData Field:
+For a Field derived from another LibSemanticData Field:
 
 ```lua
 origin = {
-    sourceType = "LibBrokerData-1.0",
+    sourceType = "LibSemanticData-1.0",
     providerID = "SomeProvider",
     fieldID = "someField",
 }
@@ -394,8 +394,8 @@ origin = {
 
 Normative rules:
 
-- `providerID` is required and must satisfy the normal LibBrokerData Provider-ID rules
-- `fieldID` is required and must satisfy the normal LibBrokerData Field-ID rules
+- `providerID` is required and must satisfy the normal LibSemanticData Provider-ID rules
+- `fieldID` is required and must satisfy the normal LibSemanticData Field-ID rules
 - the reference identifies the technical source Field only; it does not imply a current Entity, display line, formatting rule, or other Consumer context
 
 #### 7.4.3 Duplicate registration compatibility
@@ -434,7 +434,7 @@ Example:
 }
 ```
 
-For LibBrokerData-1.0, the defined Entity keys are `entityType`, `entityID`, and optional `entityLabel`. Additional Entity keys are rejected as `INVALID_ENTITY`.
+For LibSemanticData-1.0, the defined Entity keys are `entityType`, `entityID`, and optional `entityLabel`. Additional Entity keys are rejected as `INVALID_ENTITY`.
 
 Recommended Entity types may include:
 
@@ -457,7 +457,7 @@ The Entity identity is the combination of:
 entityType + entityID
 ```
 
-For LibBrokerData-1.0, `entityID` may be:
+For LibSemanticData-1.0, `entityID` may be:
 
 - a non-empty string, or
 - a finite number
@@ -544,7 +544,7 @@ entityID    = Player-1234-0000ABCD
 
 ## 10. Data types
 
-LibBrokerData-1.0 defines these initial semantic types:
+LibSemanticData-1.0 defines these initial semantic types:
 
 | Type | Lua value | Semantics |
 | --- | --- | --- |
@@ -640,7 +640,7 @@ Optionally:
 }
 ```
 
-For LibBrokerData-1.0, the defined `progress` keys are exactly:
+For LibSemanticData-1.0, the defined `progress` keys are exactly:
 
 - `current`
 - `maximum`
@@ -653,10 +653,10 @@ Progress tables are logical immutable value snapshots.
 Normative rules:
 
 - Producers must publish a new table when changing progress data.
-- LibBrokerData must not keep a Producer-owned progress table as mutable shared state.
+- LibSemanticData must not keep a Producer-owned progress table as mutable shared state.
 - The library must capture the submitted progress value as library-owned state.
-- A Producer may mutate or reuse its original input table after `SetValue()` or `SetValues()` returns without changing LibBrokerData's stored value.
-- Consumers must treat progress tables returned by LibBrokerData as read-only.
+- A Producer may mutate or reuse its original input table after `SetValue()` or `SetValues()` returns without changing LibSemanticData's stored value.
+- Consumers must treat progress tables returned by LibSemanticData as read-only.
 - A later value update must not mutate an older progress snapshot that was already returned or delivered in a callback.
 
 ## 11. Nil and unavailable data
@@ -674,7 +674,7 @@ A consumer decides whether to hide the value, show a placeholder, hide a complet
 The Producer API for 1.0 includes:
 
 ```lua
-LBD:RegisterProvider(providerID, info)
+LSD:RegisterProvider(providerID, info)
 
 provider:RegisterField(fieldID, info)
 
@@ -803,7 +803,7 @@ The public API uses explicit return values for normal validation and lookup fail
 ### 13.1 Registration
 
 ```lua
-LBD:RegisterProvider(providerID, info)
+LSD:RegisterProvider(providerID, info)
 → provider, err
 ```
 
@@ -870,27 +870,27 @@ and no changes are applied.
 ### 13.3 Lookups
 
 ```lua
-LBD:GetProvider(providerID)
+LSD:GetProvider(providerID)
 → provider, err
 ```
 
 ```lua
-LBD:GetField(providerID, fieldID)
+LSD:GetField(providerID, fieldID)
 → field, err
 ```
 
 For values:
 
 ```lua
-LBD:GetValue(providerID, fieldID)
-LBD:GetValue(providerID, fieldID, entityType, entityID)
+LSD:GetValue(providerID, fieldID)
+LSD:GetValue(providerID, fieldID, entityType, entityID)
 → value, entity, err
 ```
 
 For a Field with `scope = "single"`:
 
 ```lua
-LBD:GetValue(providerID, fieldID)
+LSD:GetValue(providerID, fieldID)
 ```
 
 is valid and returns:
@@ -908,7 +908,7 @@ nil, nil, ENTITY_NOT_ALLOWED
 For a Field with `scope = "entity"`:
 
 ```lua
-LBD:GetValue(providerID, fieldID, entityType, entityID)
+LSD:GetValue(providerID, fieldID, entityType, entityID)
 ```
 
 is required.
@@ -958,19 +958,19 @@ Iterator functions return iterators only and do not return normal API error code
 The signatures are:
 
 ```lua
-for providerID, provider in LBD:IterateProviders() do
+for providerID, provider in LSD:IterateProviders() do
     ...
 end
 ```
 
 ```lua
-for fieldID, field in LBD:IterateFields(providerID) do
+for fieldID, field in LSD:IterateFields(providerID) do
     ...
 end
 ```
 
 ```lua
-for value, entity in LBD:IterateValues(providerID, fieldID) do
+for value, entity in LSD:IterateValues(providerID, fieldID) do
     ...
 end
 ```
@@ -980,7 +980,7 @@ An unknown Provider or Field produces an empty iterator.
 ### 13.5 Callbacks
 
 ```lua
-LBD:RegisterCallback(event, callback)
+LSD:RegisterCallback(event, callback)
 → token, err
 ```
 
@@ -1007,7 +1007,7 @@ nil, INVALID_CALLBACK
 Callback removal uses:
 
 ```lua
-LBD:UnregisterCallback(token)
+LSD:UnregisterCallback(token)
 → removed, err
 ```
 
@@ -1034,14 +1034,14 @@ nil, INVALID_CALLBACK_TOKEN
 The Consumer API for 1.0 includes:
 
 ```lua
-LBD:GetProvider(providerID)
-LBD:GetField(providerID, fieldID)
-LBD:GetValue(providerID, fieldID)
-LBD:GetValue(providerID, fieldID, entityType, entityID)
+LSD:GetProvider(providerID)
+LSD:GetField(providerID, fieldID)
+LSD:GetValue(providerID, fieldID)
+LSD:GetValue(providerID, fieldID, entityType, entityID)
 
-LBD:IterateProviders()
-LBD:IterateFields(providerID)
-LBD:IterateValues(providerID, fieldID)
+LSD:IterateProviders()
+LSD:IterateFields(providerID)
+LSD:IterateValues(providerID, fieldID)
 ```
 
 Consumers must be able to discover Providers and Fields regardless of load order.
@@ -1051,7 +1051,7 @@ Consumers must be able to discover Providers and Fields regardless of load order
 `IterateValues(providerID, fieldID)` returns:
 
 ```lua
-for value, entity in LBD:IterateValues(providerID, fieldID) do
+for value, entity in LSD:IterateValues(providerID, fieldID) do
     ...
 end
 ```
@@ -1107,14 +1107,14 @@ Consumers remain free to apply their own sorting.
 
 ## 17. Events and callbacks
 
-LibBrokerData provides its own callback system.
+LibSemanticData provides its own callback system.
 
 The callback API for 1.0 includes:
 
 ```lua
-local token = LBD:RegisterCallback(event, callback)
+local token = LSD:RegisterCallback(event, callback)
 
-LBD:UnregisterCallback(token)
+LSD:UnregisterCallback(token)
 ```
 
 The returned token is opaque to consumers.
@@ -1122,9 +1122,9 @@ The returned token is opaque to consumers.
 Initial events:
 
 ```lua
-LBD.EVENT_PROVIDER_REGISTERED
-LBD.EVENT_FIELD_REGISTERED
-LBD.EVENT_VALUES_CHANGED
+LSD.EVENT_PROVIDER_REGISTERED
+LSD.EVENT_FIELD_REGISTERED
+LSD.EVENT_VALUES_CHANGED
 ```
 
 ### 17.1 Provider registered
@@ -1339,13 +1339,13 @@ Normative rules:
 - A later Entity metadata update must never alter an Entity snapshot that was already delivered in an earlier callback.
 - When Entity metadata changed, `oldEntity` and `newEntity` must not reference the same mutable table.
 - If Entity metadata did not change, an implementation may reuse an equivalent immutable snapshot representation within that change record.
-- Consumers must treat all Entity tables returned by LibBrokerData as read-only.
+- Consumers must treat all Entity tables returned by LibSemanticData as read-only.
 - Producers must not treat Entity tables passed to `SetValue()` or `SetValues()` as shared mutable library state. The library owns its stored Entity metadata after the call.
 - The implementation must not depend on a Producer keeping its input Entity table unchanged after the call.
 
 The library must implement Entity metadata with snapshot/replacement semantics rather than mutating a previously published Entity metadata table in place.
 
-The library must capture Producer-supplied Entity metadata as library-owned state. A Producer may mutate or reuse its original Entity table after `SetValue()` or `SetValues()` returns without changing the Entity metadata stored by LibBrokerData.
+The library must capture Producer-supplied Entity metadata as library-owned state. A Producer may mutate or reuse its original Entity table after `SetValue()` or `SetValues()` returns without changing the Entity metadata stored by LibSemanticData.
 
 This guarantees that old callback snapshots remain stable across later metadata changes.
 
@@ -1438,7 +1438,7 @@ The existing registration is not modified.
 
 ## 21. Embedded MINOR revision upgrade behavior
 
-Multiple addons may embed different implementation revisions of `LibBrokerData-1.0`.
+Multiple addons may embed different implementation revisions of `LibSemanticData-1.0`.
 
 Example:
 
@@ -1469,7 +1469,7 @@ The following state must be preserved:
 The global table:
 
 ```lua
-_G["LibBrokerData-1.0"]
+_G["LibSemanticData-1.0"]
 ```
 
 must never be replaced during a compatible MINOR upgrade.
@@ -1480,7 +1480,7 @@ The new `lib.MINOR` value is assigned only after the upgrade and any required mi
 
 If an equal or newer MINOR revision is already loaded, an older embedded copy performs no downgrade and leaves the current implementation untouched.
 
-All MINOR revisions within `LibBrokerData-1.0` must remain backward-compatible with the public 1.0 specification.
+All MINOR revisions within `LibSemanticData-1.0` must remain backward-compatible with the public 1.0 specification.
 
 ## 22. Errors
 
@@ -1519,7 +1519,7 @@ Malformed Provider or Field metadata that does not have a more specific error co
 
 ## 23. Current context is consumer logic
 
-LibBrokerData does not define special semantics such as:
+LibSemanticData does not define special semantics such as:
 
 ```text
 currentCharacter
@@ -1528,7 +1528,7 @@ currentGuild
 currentPet
 ```
 
-LibBrokerData only exposes the available Entities.
+LibSemanticData only exposes the available Entities.
 
 Example:
 
@@ -1547,7 +1547,7 @@ UnitGUID("player")
 
 and select the matching Entity itself.
 
-This behavior belongs to the consumer, not LibBrokerData.
+This behavior belongs to the consumer, not LibSemanticData.
 
 ## 24. Non-normative Broker Panels reference example
 
@@ -1555,7 +1555,7 @@ A consumer such as Broker Panels may internally refer to a fixed Entity approxim
 
 ```lua
 {
-    sourceType = "LibBrokerData",
+    sourceType = "LibSemanticData",
     providerID = "MyAccountant",
     fieldID = "characterGold",
 
@@ -1571,7 +1571,7 @@ Or it may use its own dynamic selection mode:
 
 ```lua
 {
-    sourceType = "LibBrokerData",
+    sourceType = "LibSemanticData",
     providerID = "MyAccountant",
     fieldID = "characterGold",
 
@@ -1583,9 +1583,9 @@ Or it may use its own dynamic selection mode:
 
 `entity.mode` is consumer-specific configuration.
 
-It is not part of LibBrokerData.
+It is not part of LibSemanticData.
 
-LibBrokerData only needs to provide stable source information:
+LibSemanticData only needs to provide stable source information:
 
 ```text
 providerID
@@ -1597,7 +1597,7 @@ entityLabel
 
 ## 25. LibDataBroker independence
 
-LibBrokerData does not replace LibDataBroker.
+LibSemanticData does not replace LibDataBroker.
 
 An addon may simultaneously publish:
 
@@ -1609,7 +1609,7 @@ LibDataBroker-1.1
 and:
 
 ```text
-LibBrokerData-1.0
+LibSemanticData-1.0
 → structured semantic values
 ```
 
@@ -1619,7 +1619,7 @@ Example:
 LibDataBroker:
 [Gold Icon] 1424g
 
-LibBrokerData:
+LibSemanticData:
 ├── realmGold
 ├── characterGold
 ├── sessionIncome
@@ -1632,7 +1632,7 @@ Neither library depends on the other.
 
 ## 26. No formatting
 
-LibBrokerData never converts semantic data into final display strings.
+LibSemanticData never converts semantic data into final display strings.
 
 Examples:
 
@@ -1646,7 +1646,7 @@ A consumer decides how these values appear.
 
 ## 27. No UI semantics
 
-LibBrokerData does not define:
+LibSemanticData does not define:
 
 - font
 - size
@@ -1663,17 +1663,17 @@ A `status` value such as `warning` does not imply a specific color.
 
 ## 28. Persistence
 
-LibBrokerData stores no SavedVariables and has no persistence responsibility.
+LibSemanticData stores no SavedVariables and has no persistence responsibility.
 
 A Producer owns its source data.
 
 A Consumer owns its configuration.
 
-LibBrokerData only exposes current runtime data.
+LibSemanticData only exposes current runtime data.
 
 ## 29. Relationship to other WoW libraries
 
-LibBrokerData is an independent implementation.
+LibSemanticData is an independent implementation.
 
 It uses established architectural ideas common in WoW addon development, such as:
 
@@ -1710,9 +1710,9 @@ The initial specification intentionally excludes:
 ## 31. Example: MyAccountant
 
 ```lua
-local LBD = _G["LibBrokerData-1.0"]
+local LSD = _G["LibSemanticData-1.0"]
 
-local provider = LBD:RegisterProvider("MyAccountant", {
+local provider = LSD:RegisterProvider("MyAccountant", {
     label = "MyAccountant",
     addon = "MyAccountant",
 })
@@ -1756,9 +1756,9 @@ A consumer can display those values freely or combine them with Fields from enti
 Recommended initial structure:
 
 ```text
-LibBrokerData/
-├── LibBrokerData-1.0/
-│   └── LibBrokerData-1.0.lua
+LibSemanticData/
+├── LibSemanticData-1.0/
+│   └── LibSemanticData-1.0.lua
 ├── README.md
 ├── SPECIFICATION.md
 ├── CHANGELOG.md
@@ -1769,7 +1769,7 @@ Only the runtime library directory needs to be embedded into normal addons.
 
 ## 33. 1.0 specification status
 
-Draft 0.8 is the implementation-candidate specification for `LibBrokerData-1.0`.
+Draft 0.9 is the implementation-candidate specification for `LibSemanticData-1.0`.
 
 The current implementation revision is:
 
