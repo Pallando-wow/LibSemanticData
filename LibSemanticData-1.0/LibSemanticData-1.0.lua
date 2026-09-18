@@ -1,5 +1,5 @@
 local MAJOR = "LibSemanticData-1.0"
-local MINOR = 6
+local MINOR = 7
 
 local existing = _G[MAJOR]
 
@@ -38,6 +38,18 @@ local fields = ensureTable(state, "fields")
 local fieldInfo = ensureTable(state, "fieldInfo")
 local fieldOrder = ensureTable(state, "fieldOrder")
 local values = ensureTable(state, "values")
+local fieldHandlers = ensureTable(state, "fieldHandlers")
+local settingSections = ensureTable(state, "settingSections")
+local settingSectionInfo = ensureTable(state, "settingSectionInfo")
+local settingSectionOrder = ensureTable(state, "settingSectionOrder")
+local settings = ensureTable(state, "settings")
+local settingInfo = ensureTable(state, "settingInfo")
+local settingOrder = ensureTable(state, "settingOrder")
+local settingHandlers = ensureTable(state, "settingHandlers")
+local actions = ensureTable(state, "actions")
+local actionInfo = ensureTable(state, "actionInfo")
+local actionOrder = ensureTable(state, "actionOrder")
+local actionHandlers = ensureTable(state, "actionHandlers")
 local callbacks = ensureTable(state, "callbacks")
 local callbackTokens = ensureTable(state, "callbackTokens")
 
@@ -115,6 +127,36 @@ local function deepEqual(left, right, seen)
     return true
 end
 
+local function strictArrayLength(value)
+    if type(value) ~= "table" then
+        return nil
+    end
+
+    local count = 0
+    local highest = 0
+
+    for key in pairs(value) do
+        if type(key) ~= "number"
+            or key < 1
+            or key ~= math.floor(key)
+        then
+            return nil
+        end
+
+        count = count + 1
+
+        if key > highest then
+            highest = key
+        end
+    end
+
+    if highest ~= count then
+        return nil
+    end
+
+    return count
+end
+
 local function isValidTechnicalID(value)
     return type(value) == "string"
         and value ~= ""
@@ -141,6 +183,65 @@ local function isValidEntityID(entityID)
     return isFiniteNumber(entityID)
 end
 
+local function isValidLocale(locale)
+    return type(locale) == "string"
+        and locale:match("^[a-z][a-z][A-Z][A-Z]$") ~= nil
+end
+
+local function validateLocalizedText(value)
+    if type(value) ~= "table"
+        or type(value.enUS) ~= "string"
+        or value.enUS == ""
+    then
+        return nil, "INVALID_LOCALIZED_TEXT"
+    end
+
+    for locale, text in pairs(value) do
+        if not isValidLocale(locale)
+            or type(text) ~= "string"
+            or text == ""
+        then
+            return nil, "INVALID_LOCALIZED_TEXT"
+        end
+    end
+
+    return true
+end
+
+local function validateOptionalLocalizedText(value)
+    if value == nil then
+        return true
+    end
+
+    return validateLocalizedText(value)
+end
+
+local function validateIcon(icon)
+    if icon == nil then
+        return true
+    end
+
+    if type(icon) == "number" then
+        return isFiniteNumber(icon)
+            and icon > 0
+            and icon == math.floor(icon)
+    end
+
+    return type(icon) == "string" and icon ~= ""
+end
+
+local function isValidSettingSectionID(sectionID)
+    return isValidTechnicalID(sectionID)
+end
+
+local function isValidSettingID(settingID)
+    return isValidTechnicalID(settingID)
+end
+
+local function isValidActionID(actionID)
+    return isValidTechnicalID(actionID)
+end
+
 local fieldTypes = {
     text = true,
     number = true,
@@ -158,31 +259,45 @@ local function validateProviderInfo(info)
         return nil, "INVALID_VALUE"
     end
 
-    if type(info.label) ~= "string" or info.label == "" then
-        return nil, "INVALID_VALUE"
+    local valid, validationError = validateLocalizedText(info.label)
+
+    if not valid then
+        return nil, validationError
     end
 
-    if info.description ~= nil and type(info.description) ~= "string" then
-        return nil, "INVALID_VALUE"
+    valid, validationError = validateOptionalLocalizedText(info.description)
+
+    if not valid then
+        return nil, validationError
     end
 
     if info.addon ~= nil and type(info.addon) ~= "string" then
         return nil, "INVALID_VALUE"
     end
 
+    if not validateIcon(info.icon) then
+        return nil, "INVALID_ICON"
+    end
+
     return true
 end
 
 local function isCompatibleProviderInfo(current, incoming)
-    if current.label ~= incoming.label then
+    if not deepEqual(current.label, incoming.label) then
         return false
     end
 
-    if incoming.description ~= nil and current.description ~= incoming.description then
+    if incoming.description ~= nil
+        and not deepEqual(current.description, incoming.description)
+    then
         return false
     end
 
     if incoming.addon ~= nil and current.addon ~= incoming.addon then
+        return false
+    end
+
+    if incoming.icon ~= nil and current.icon ~= incoming.icon then
         return false
     end
 
@@ -240,8 +355,10 @@ local function validateFieldInfo(info)
         return nil, "INVALID_VALUE"
     end
 
-    if type(info.label) ~= "string" or info.label == "" then
-        return nil, "INVALID_VALUE"
+    local valid, validationError = validateLocalizedText(info.label)
+
+    if not valid then
+        return nil, validationError
     end
 
     if type(info.type) ~= "string" or not fieldTypes[info.type] then
@@ -260,27 +377,51 @@ local function validateFieldInfo(info)
         return nil, "INVALID_ENTITY"
     end
 
-    if info.description ~= nil and type(info.description) ~= "string" then
-        return nil, "INVALID_VALUE"
+    valid, validationError = validateOptionalLocalizedText(info.description)
+
+    if not valid then
+        return nil, validationError
     end
 
     if info.unit ~= nil and type(info.unit) ~= "string" then
         return nil, "INVALID_VALUE"
     end
 
-    if info.category ~= nil and type(info.category) ~= "string" then
+    if info.category ~= nil and not isValidTechnicalID(info.category) then
         return nil, "INVALID_VALUE"
     end
 
-    if info.categoryLabel ~= nil and type(info.categoryLabel) ~= "string" then
-        return nil, "INVALID_VALUE"
+    valid, validationError = validateOptionalLocalizedText(info.categoryLabel)
+
+    if not valid then
+        return nil, validationError
+    end
+
+    if not validateIcon(info.icon) then
+        return nil, "INVALID_ICON"
     end
 
     if info.origin ~= nil then
-        local valid, originError = validateOrigin(info.origin)
+        local originValid, originError = validateOrigin(info.origin)
 
-        if not valid then
+        if not originValid then
             return nil, originError
+        end
+    end
+
+    if info.interactions ~= nil then
+        if type(info.interactions) ~= "table" then
+            return nil, "INVALID_VALUE"
+        end
+
+        for key, actionID in pairs(info.interactions) do
+            if key ~= "primary" and key ~= "secondary" then
+                return nil, "INVALID_VALUE"
+            end
+
+            if not isValidActionID(actionID) then
+                return nil, "INVALID_ACTION_ID"
+            end
         end
     end
 
@@ -288,7 +429,7 @@ local function validateFieldInfo(info)
 end
 
 local function isCompatibleFieldInfo(current, incoming)
-    if current.label ~= incoming.label
+    if not deepEqual(current.label, incoming.label)
         or current.type ~= incoming.type
         or current.scope ~= incoming.scope
     then
@@ -299,22 +440,388 @@ local function isCompatibleFieldInfo(current, incoming)
         return false
     end
 
-    local optionalKeys = {
-        "description",
+    local optionalScalarKeys = {
         "unit",
         "category",
-        "categoryLabel",
+        "icon",
     }
 
-    for index = 1, #optionalKeys do
-        local key = optionalKeys[index]
+    for index = 1, #optionalScalarKeys do
+        local key = optionalScalarKeys[index]
 
         if incoming[key] ~= nil and current[key] ~= incoming[key] then
             return false
         end
     end
 
-    if incoming.origin ~= nil and not deepEqual(current.origin, incoming.origin) then
+    local optionalTableKeys = {
+        "description",
+        "categoryLabel",
+        "origin",
+        "interactions",
+    }
+
+    for index = 1, #optionalTableKeys do
+        local key = optionalTableKeys[index]
+
+        if incoming[key] ~= nil and not deepEqual(current[key], incoming[key]) then
+            return false
+        end
+    end
+
+    return true
+end
+
+local function validateFieldHandlers(handlers)
+    if handlers == nil then
+        return true
+    end
+
+    if type(handlers) ~= "table" then
+        return nil, "INVALID_HANDLER"
+    end
+
+    for key, value in pairs(handlers) do
+        if key ~= "getIcon" or type(value) ~= "function" then
+            return nil, "INVALID_HANDLER"
+        end
+    end
+
+    return true
+end
+
+local settingTypes = {
+    boolean = true,
+    enum = true,
+    number = true,
+    string = true,
+}
+
+local function validateSettingSectionInfo(info)
+    if type(info) ~= "table" then
+        return nil, "INVALID_VALUE"
+    end
+
+    local valid, validationError = validateLocalizedText(info.label)
+
+    if not valid then
+        return nil, validationError
+    end
+
+    valid, validationError = validateOptionalLocalizedText(info.description)
+
+    if not valid then
+        return nil, validationError
+    end
+
+    valid, validationError = validateOptionalLocalizedText(info.help)
+
+    if not valid then
+        return nil, validationError
+    end
+
+    return true
+end
+
+local function isCompatibleSettingSectionInfo(current, incoming)
+    if not deepEqual(current.label, incoming.label) then
+        return false
+    end
+
+    if incoming.description ~= nil
+        and not deepEqual(current.description, incoming.description)
+    then
+        return false
+    end
+
+    if incoming.help ~= nil and not deepEqual(current.help, incoming.help) then
+        return false
+    end
+
+    return true
+end
+
+local function validateEnumChoices(choices)
+    local count = strictArrayLength(choices)
+
+    if count == nil or count < 1 then
+        return nil, "INVALID_SETTING_VALUE"
+    end
+
+    local seen = {}
+
+    for index = 1, count do
+        local choice = choices[index]
+
+        if type(choice) ~= "table"
+            or type(choice.value) ~= "string"
+            or choice.value == ""
+            or seen[choice.value]
+        then
+            return nil, "INVALID_SETTING_VALUE"
+        end
+
+        local valid, validationError = validateLocalizedText(choice.label)
+
+        if not valid then
+            return nil, validationError
+        end
+
+        valid, validationError = validateOptionalLocalizedText(choice.description)
+
+        if not valid then
+            return nil, validationError
+        end
+
+        for key in pairs(choice) do
+            if key ~= "value" and key ~= "label" and key ~= "description" then
+                return nil, "INVALID_SETTING_VALUE"
+            end
+        end
+
+        seen[choice.value] = true
+    end
+
+    return seen
+end
+
+local function validateSettingValue(info, value)
+    if info.type == "boolean" then
+        return type(value) == "boolean"
+    end
+
+    if info.type == "string" then
+        return type(value) == "string"
+    end
+
+    if info.type == "number" then
+        if not isFiniteNumber(value) then
+            return false
+        end
+
+        if info.min ~= nil and value < info.min then
+            return false
+        end
+
+        if info.max ~= nil and value > info.max then
+            return false
+        end
+
+        return true
+    end
+
+    if info.type == "enum" then
+        if type(value) ~= "string" then
+            return false
+        end
+
+        for index = 1, #info.choices do
+            if info.choices[index].value == value then
+                return true
+            end
+        end
+
+        return false
+    end
+
+    return false
+end
+
+local function validateSettingInfo(info)
+    if type(info) ~= "table" then
+        return nil, "INVALID_VALUE"
+    end
+
+    local valid, validationError = validateLocalizedText(info.label)
+
+    if not valid then
+        return nil, validationError
+    end
+
+    valid, validationError = validateOptionalLocalizedText(info.description)
+
+    if not valid then
+        return nil, validationError
+    end
+
+    valid, validationError = validateOptionalLocalizedText(info.help)
+
+    if not valid then
+        return nil, validationError
+    end
+
+    if type(info.type) ~= "string" or not settingTypes[info.type] then
+        return nil, "INVALID_SETTING_TYPE"
+    end
+
+    if info.scope ~= "single" and info.scope ~= "entity" then
+        return nil, "INVALID_VALUE"
+    end
+
+    if info.scope == "entity" then
+        if not isValidEntityType(info.entityType) then
+            return nil, "INVALID_ENTITY"
+        end
+    elseif info.entityType ~= nil then
+        return nil, "INVALID_ENTITY"
+    end
+
+    if info.section ~= nil and not isValidSettingSectionID(info.section) then
+        return nil, "INVALID_SETTING_SECTION_ID"
+    end
+
+    if info.type == "enum" then
+        local choicesValid, choicesError = validateEnumChoices(info.choices)
+
+        if not choicesValid then
+            return nil, choicesError
+        end
+
+        if info.min ~= nil or info.max ~= nil or info.step ~= nil then
+            return nil, "INVALID_SETTING_VALUE"
+        end
+    elseif info.choices ~= nil then
+        return nil, "INVALID_SETTING_VALUE"
+    end
+
+    if info.type == "number" then
+        if info.min ~= nil and not isFiniteNumber(info.min) then
+            return nil, "INVALID_SETTING_VALUE"
+        end
+
+        if info.max ~= nil and not isFiniteNumber(info.max) then
+            return nil, "INVALID_SETTING_VALUE"
+        end
+
+        if info.min ~= nil and info.max ~= nil and info.min > info.max then
+            return nil, "INVALID_SETTING_VALUE"
+        end
+
+        if info.step ~= nil
+            and (not isFiniteNumber(info.step) or info.step <= 0)
+        then
+            return nil, "INVALID_SETTING_VALUE"
+        end
+    elseif info.min ~= nil or info.max ~= nil or info.step ~= nil then
+        return nil, "INVALID_SETTING_VALUE"
+    end
+
+    if info.default == nil or not validateSettingValue(info, info.default) then
+        return nil, "INVALID_SETTING_VALUE"
+    end
+
+    return true
+end
+
+local function isCompatibleSettingInfo(current, incoming)
+    local requiredKeys = {
+        "type",
+        "scope",
+    }
+
+    if not deepEqual(current.label, incoming.label) then
+        return false
+    end
+
+    for index = 1, #requiredKeys do
+        local key = requiredKeys[index]
+
+        if current[key] ~= incoming[key] then
+            return false
+        end
+    end
+
+    if current.scope == "entity" and current.entityType ~= incoming.entityType then
+        return false
+    end
+
+    local optionalScalarKeys = {
+        "section",
+        "min",
+        "max",
+        "step",
+    }
+
+    for index = 1, #optionalScalarKeys do
+        local key = optionalScalarKeys[index]
+
+        if incoming[key] ~= nil and current[key] ~= incoming[key] then
+            return false
+        end
+    end
+
+    local optionalTableKeys = {
+        "description",
+        "help",
+        "choices",
+    }
+
+    for index = 1, #optionalTableKeys do
+        local key = optionalTableKeys[index]
+
+        if incoming[key] ~= nil and not deepEqual(current[key], incoming[key]) then
+            return false
+        end
+    end
+
+    return deepEqual(current.default, incoming.default)
+end
+
+local function validateSettingHandlers(handlers)
+    if type(handlers) ~= "table"
+        or type(handlers.get) ~= "function"
+        or type(handlers.set) ~= "function"
+    then
+        return nil, "INVALID_HANDLER"
+    end
+
+    for key in pairs(handlers) do
+        if key ~= "get" and key ~= "set" then
+            return nil, "INVALID_HANDLER"
+        end
+    end
+
+    return true
+end
+
+local function validateActionInfo(info)
+    if type(info) ~= "table" then
+        return nil, "INVALID_VALUE"
+    end
+
+    local valid, validationError = validateLocalizedText(info.label)
+
+    if not valid then
+        return nil, validationError
+    end
+
+    valid, validationError = validateOptionalLocalizedText(info.description)
+
+    if not valid then
+        return nil, validationError
+    end
+
+    valid, validationError = validateOptionalLocalizedText(info.help)
+
+    if not valid then
+        return nil, validationError
+    end
+
+    return true
+end
+
+local function isCompatibleActionInfo(current, incoming)
+    if not deepEqual(current.label, incoming.label) then
+        return false
+    end
+
+    if incoming.description ~= nil
+        and not deepEqual(current.description, incoming.description)
+    then
+        return false
+    end
+
+    if incoming.help ~= nil and not deepEqual(current.help, incoming.help) then
         return false
     end
 
@@ -414,12 +921,22 @@ end
 
 lib.EVENT_PROVIDER_REGISTERED = "LibSemanticData_ProviderRegistered"
 lib.EVENT_FIELD_REGISTERED = "LibSemanticData_FieldRegistered"
+lib.EVENT_FIELD_ICON_CHANGED = "LibSemanticData_FieldIconChanged"
 lib.EVENT_VALUES_CHANGED = "LibSemanticData_ValuesChanged"
+lib.EVENT_SETTING_SECTION_REGISTERED = "LibSemanticData_SettingSectionRegistered"
+lib.EVENT_SETTING_REGISTERED = "LibSemanticData_SettingRegistered"
+lib.EVENT_SETTINGS_CHANGED = "LibSemanticData_SettingsChanged"
+lib.EVENT_ACTION_REGISTERED = "LibSemanticData_ActionRegistered"
 
 local supportedEvents = {
     [lib.EVENT_PROVIDER_REGISTERED] = true,
     [lib.EVENT_FIELD_REGISTERED] = true,
+    [lib.EVENT_FIELD_ICON_CHANGED] = true,
     [lib.EVENT_VALUES_CHANGED] = true,
+    [lib.EVENT_SETTING_SECTION_REGISTERED] = true,
+    [lib.EVENT_SETTING_REGISTERED] = true,
+    [lib.EVENT_SETTINGS_CHANGED] = true,
+    [lib.EVENT_ACTION_REGISTERED] = true,
 }
 
 for event in pairs(supportedEvents) do
@@ -493,11 +1010,50 @@ else
     end
 end
 
+local settingSectionMethods = lib._settingSectionMethods
+
+if type(settingSectionMethods) ~= "table" then
+    settingSectionMethods = {}
+    lib._settingSectionMethods = settingSectionMethods
+else
+    for key in pairs(settingSectionMethods) do
+        settingSectionMethods[key] = nil
+    end
+end
+
+local settingMethods = lib._settingMethods
+
+if type(settingMethods) ~= "table" then
+    settingMethods = {}
+    lib._settingMethods = settingMethods
+else
+    for key in pairs(settingMethods) do
+        settingMethods[key] = nil
+    end
+end
+
+local actionMethods = lib._actionMethods
+
+if type(actionMethods) ~= "table" then
+    actionMethods = {}
+    lib._actionMethods = actionMethods
+else
+    for key in pairs(actionMethods) do
+        actionMethods[key] = nil
+    end
+end
+
 local providerObjectIDs = {}
 local fieldObjectInfo = {}
+local settingSectionObjectInfo = {}
+local settingObjectInfo = {}
+local actionObjectInfo = {}
 
 state.providerObjectIDs = providerObjectIDs
 state.fieldObjectInfo = fieldObjectInfo
+state.settingSectionObjectInfo = settingSectionObjectInfo
+state.settingObjectInfo = settingObjectInfo
+state.actionObjectInfo = actionObjectInfo
 
 local providerMetatable = lib._providerMetatable
 
@@ -511,6 +1067,27 @@ local fieldMetatable = lib._fieldMetatable
 if type(fieldMetatable) ~= "table" then
     fieldMetatable = {}
     lib._fieldMetatable = fieldMetatable
+end
+
+local settingSectionMetatable = lib._settingSectionMetatable
+
+if type(settingSectionMetatable) ~= "table" then
+    settingSectionMetatable = {}
+    lib._settingSectionMetatable = settingSectionMetatable
+end
+
+local settingMetatable = lib._settingMetatable
+
+if type(settingMetatable) ~= "table" then
+    settingMetatable = {}
+    lib._settingMetatable = settingMetatable
+end
+
+local actionMetatable = lib._actionMetatable
+
+if type(actionMetatable) ~= "table" then
+    actionMetatable = {}
+    lib._actionMetatable = actionMetatable
 end
 
 providerMetatable.__index = function(provider, key)
@@ -572,6 +1149,108 @@ end
 
 fieldMetatable.__newindex = function()
     error(MAJOR .. " field objects are read-only", 2)
+end
+
+settingSectionMetatable.__index = function(section, key)
+    local method = settingSectionMethods[key]
+
+    if method ~= nil then
+        return method
+    end
+
+    local identity = settingSectionObjectInfo[section]
+
+    if identity == nil then
+        return nil
+    end
+
+    local info = settingSectionInfo[identity.providerID]
+        and settingSectionInfo[identity.providerID][identity.sectionID]
+        or nil
+
+    if info == nil then
+        return nil
+    end
+
+    local value = info[key]
+
+    if type(value) == "table" then
+        return cloneValue(value)
+    end
+
+    return value
+end
+
+settingSectionMetatable.__newindex = function()
+    error(MAJOR .. " setting section objects are read-only", 2)
+end
+
+settingMetatable.__index = function(setting, key)
+    local method = settingMethods[key]
+
+    if method ~= nil then
+        return method
+    end
+
+    local identity = settingObjectInfo[setting]
+
+    if identity == nil then
+        return nil
+    end
+
+    local info = settingInfo[identity.providerID]
+        and settingInfo[identity.providerID][identity.settingID]
+        or nil
+
+    if info == nil then
+        return nil
+    end
+
+    local value = info[key]
+
+    if type(value) == "table" then
+        return cloneValue(value)
+    end
+
+    return value
+end
+
+settingMetatable.__newindex = function()
+    error(MAJOR .. " setting objects are read-only", 2)
+end
+
+actionMetatable.__index = function(action, key)
+    local method = actionMethods[key]
+
+    if method ~= nil then
+        return method
+    end
+
+    local identity = actionObjectInfo[action]
+
+    if identity == nil then
+        return nil
+    end
+
+    local info = actionInfo[identity.providerID]
+        and actionInfo[identity.providerID][identity.actionID]
+        or nil
+
+    if info == nil then
+        return nil
+    end
+
+    local value = info[key]
+
+    if type(value) == "table" then
+        return cloneValue(value)
+    end
+
+    return value
+end
+
+actionMetatable.__newindex = function()
+    error(MAJOR .. " action objects are read-only", 2)
 end
 
 local function clearObject(object)
@@ -687,6 +1366,54 @@ for providerID, provider in pairs(providers) do
         values[providerID] = {}
     end
 
+    if type(fieldHandlers[providerID]) ~= "table" then
+        fieldHandlers[providerID] = {}
+    end
+
+    if type(settingSections[providerID]) ~= "table" then
+        settingSections[providerID] = {}
+    end
+
+    if type(settingSectionInfo[providerID]) ~= "table" then
+        settingSectionInfo[providerID] = {}
+    end
+
+    if type(settingSectionOrder[providerID]) ~= "table" then
+        settingSectionOrder[providerID] = {}
+    end
+
+    if type(settings[providerID]) ~= "table" then
+        settings[providerID] = {}
+    end
+
+    if type(settingInfo[providerID]) ~= "table" then
+        settingInfo[providerID] = {}
+    end
+
+    if type(settingOrder[providerID]) ~= "table" then
+        settingOrder[providerID] = {}
+    end
+
+    if type(settingHandlers[providerID]) ~= "table" then
+        settingHandlers[providerID] = {}
+    end
+
+    if type(actions[providerID]) ~= "table" then
+        actions[providerID] = {}
+    end
+
+    if type(actionInfo[providerID]) ~= "table" then
+        actionInfo[providerID] = {}
+    end
+
+    if type(actionOrder[providerID]) ~= "table" then
+        actionOrder[providerID] = {}
+    end
+
+    if type(actionHandlers[providerID]) ~= "table" then
+        actionHandlers[providerID] = {}
+    end
+
     for fieldID, field in pairs(fields[providerID]) do
         if type(field) == "table" then
             clearObject(field)
@@ -702,6 +1429,57 @@ for providerID, provider in pairs(providers) do
         if type(info) == "table" then
             fieldInfo[providerID][fieldID] = cloneValue(info)
             ensureValueStore(providerID, fieldID, fieldInfo[providerID][fieldID])
+        end
+    end
+
+    for sectionID, section in pairs(settingSections[providerID]) do
+        if type(section) == "table" then
+            clearObject(section)
+            setmetatable(section, settingSectionMetatable)
+            settingSectionObjectInfo[section] = {
+                providerID = providerID,
+                sectionID = sectionID,
+            }
+        end
+
+        if type(settingSectionInfo[providerID][sectionID]) == "table" then
+            settingSectionInfo[providerID][sectionID] = cloneValue(
+                settingSectionInfo[providerID][sectionID]
+            )
+        end
+    end
+
+    for settingID, setting in pairs(settings[providerID]) do
+        if type(setting) == "table" then
+            clearObject(setting)
+            setmetatable(setting, settingMetatable)
+            settingObjectInfo[setting] = {
+                providerID = providerID,
+                settingID = settingID,
+            }
+        end
+
+        if type(settingInfo[providerID][settingID]) == "table" then
+            settingInfo[providerID][settingID] = cloneValue(
+                settingInfo[providerID][settingID]
+            )
+        end
+    end
+
+    for actionID, action in pairs(actions[providerID]) do
+        if type(action) == "table" then
+            clearObject(action)
+            setmetatable(action, actionMetatable)
+            actionObjectInfo[action] = {
+                providerID = providerID,
+                actionID = actionID,
+            }
+        end
+
+        if type(actionInfo[providerID][actionID]) == "table" then
+            actionInfo[providerID][actionID] = cloneValue(
+                actionInfo[providerID][actionID]
+            )
         end
     end
 end
@@ -730,6 +1508,154 @@ local function getFieldRecord(providerID, fieldID)
     end
 
     return field, fieldInfo[providerID][fieldID]
+end
+
+local function getSettingSectionRecord(providerID, sectionID)
+    local providerSections = settingSections[providerID]
+
+    if type(providerSections) ~= "table" then
+        return nil, nil
+    end
+
+    local section = providerSections[sectionID]
+
+    if section == nil then
+        return nil, nil
+    end
+
+    return section, settingSectionInfo[providerID][sectionID]
+end
+
+local function getSettingRecord(providerID, settingID)
+    local providerSettings = settings[providerID]
+
+    if type(providerSettings) ~= "table" then
+        return nil, nil, nil
+    end
+
+    local setting = providerSettings[settingID]
+
+    if setting == nil then
+        return nil, nil, nil
+    end
+
+    return setting,
+        settingInfo[providerID][settingID],
+        settingHandlers[providerID][settingID]
+end
+
+local function getActionRecord(providerID, actionID)
+    local providerActions = actions[providerID]
+
+    if type(providerActions) ~= "table" then
+        return nil, nil, nil
+    end
+
+    local action = providerActions[actionID]
+
+    if action == nil then
+        return nil, nil, nil
+    end
+
+    return action,
+        actionInfo[providerID][actionID],
+        actionHandlers[providerID][actionID]
+end
+
+local function validateSettingEntity(info, entity)
+    if info.scope == "single" then
+        if entity ~= nil then
+            return nil, "ENTITY_NOT_ALLOWED"
+        end
+
+        return nil, nil
+    end
+
+    return validateEntity(entity, info.entityType)
+end
+
+local function callSettingGetter(providerID, settingID, info, handlers, entity)
+    if type(handlers) ~= "table" or type(handlers.get) ~= "function" then
+        return nil, "INVALID_HANDLER"
+    end
+
+    local ok, value, providerError = pcall(
+        handlers.get,
+        entity and cloneValue(entity) or nil
+    )
+
+    if not ok then
+        return nil, "PROVIDER_ERROR"
+    end
+
+    if providerError ~= nil then
+        if type(providerError) == "string" and providerError ~= "" then
+            return nil, providerError
+        end
+
+        return nil, "PROVIDER_ERROR"
+    end
+
+    if not validateSettingValue(info, value) then
+        return nil, "INVALID_SETTING_VALUE"
+    end
+
+    return value, nil
+end
+
+local function callSettingSetter(handlers, value, entity)
+    if type(handlers) ~= "table" or type(handlers.set) ~= "function" then
+        return nil, "INVALID_HANDLER"
+    end
+
+    local ok, accepted, providerError = pcall(
+        handlers.set,
+        value,
+        entity and cloneValue(entity) or nil
+    )
+
+    if not ok then
+        return nil, "PROVIDER_ERROR"
+    end
+
+    if providerError ~= nil then
+        if type(providerError) == "string" and providerError ~= "" then
+            return nil, providerError
+        end
+
+        return nil, "PROVIDER_ERROR"
+    end
+
+    if accepted == false then
+        return nil, "SETTING_REJECTED"
+    end
+
+    return true, nil
+end
+
+local function callActionHandler(handler, context)
+    if type(handler) ~= "function" then
+        return nil, "INVALID_HANDLER"
+    end
+
+    local ok, accepted, providerError = pcall(
+        handler,
+        context and cloneValue(context) or nil
+    )
+
+    if not ok then
+        return nil, "PROVIDER_ERROR"
+    end
+
+    if accepted == false then
+        if type(providerError) == "string" and providerError ~= "" then
+            return nil, providerError
+        end
+
+        return nil, "ACTION_REJECTED"
+    end
+
+    return true, nil
 end
 
 local function removeEntityFromOrder(store, entityID)
@@ -952,34 +1878,22 @@ local function applyPreparedUpdate(providerID, action)
     end
 end
 
-local function strictArrayLength(value)
-    if type(value) ~= "table" then
-        return nil
+function lib:ResolveLocalizedText(localizedText, locale)
+    local valid, validationError = validateLocalizedText(localizedText)
+
+    if not valid then
+        return nil, nil, validationError
     end
 
-    local count = 0
-    local highest = 0
-
-    for key in pairs(value) do
-        if type(key) ~= "number"
-            or key < 1
-            or key ~= math.floor(key)
-        then
-            return nil
-        end
-
-        count = count + 1
-
-        if key > highest then
-            highest = key
-        end
+    if not isValidLocale(locale) then
+        return nil, nil, "INVALID_LOCALE"
     end
 
-    if highest ~= count then
-        return nil
+    if localizedText[locale] ~= nil then
+        return localizedText[locale], locale, nil
     end
 
-    return count
+    return localizedText.enUS, "enUS", nil
 end
 
 function lib:RegisterCallback(event, callback)
@@ -1067,6 +1981,18 @@ function lib:RegisterProvider(providerID, info)
     fieldInfo[providerID] = {}
     fieldOrder[providerID] = {}
     values[providerID] = {}
+    fieldHandlers[providerID] = {}
+    settingSections[providerID] = {}
+    settingSectionInfo[providerID] = {}
+    settingSectionOrder[providerID] = {}
+    settings[providerID] = {}
+    settingInfo[providerID] = {}
+    settingOrder[providerID] = {}
+    settingHandlers[providerID] = {}
+    actions[providerID] = {}
+    actionInfo[providerID] = {}
+    actionOrder[providerID] = {}
+    actionHandlers[providerID] = {}
     providerObjectIDs[provider] = providerID
 
     fireEvent(
@@ -1108,7 +2034,483 @@ function lib:IterateProviders()
     end
 end
 
-function providerMethods:RegisterField(fieldID, info)
+function providerMethods:RegisterAction(actionID, info, handler)
+    local providerID = getProviderID(self)
+
+    if providerID == nil then
+        return nil, "UNKNOWN_PROVIDER"
+    end
+
+    if not isValidActionID(actionID) then
+        return nil, "INVALID_ACTION_ID"
+    end
+
+    local valid, validationError = validateActionInfo(info)
+
+    if not valid then
+        return nil, validationError
+    end
+
+    if type(handler) ~= "function" then
+        return nil, "INVALID_HANDLER"
+    end
+
+    local providerActions = actions[providerID]
+    local action = providerActions[actionID]
+
+    if action ~= nil then
+        if not isCompatibleActionInfo(actionInfo[providerID][actionID], info) then
+            return nil, "ACTION_CONFLICT"
+        end
+
+        return action, nil
+    end
+
+    action = setmetatable({}, actionMetatable)
+    providerActions[actionID] = action
+    actionInfo[providerID][actionID] = cloneValue(info)
+    actionOrder[providerID][#actionOrder[providerID] + 1] = actionID
+    actionHandlers[providerID][actionID] = handler
+    actionObjectInfo[action] = {
+        providerID = providerID,
+        actionID = actionID,
+    }
+
+    fireEvent(
+        lib.EVENT_ACTION_REGISTERED,
+        providerID,
+        actionID,
+        action
+    )
+
+    return action, nil
+end
+
+function lib:GetAction(providerID, actionID)
+    if not isValidProviderID(providerID) then
+        return nil, "INVALID_PROVIDER_ID"
+    end
+
+    if providers[providerID] == nil then
+        return nil, "UNKNOWN_PROVIDER"
+    end
+
+    if not isValidActionID(actionID) then
+        return nil, "INVALID_ACTION_ID"
+    end
+
+    local action = actions[providerID][actionID]
+
+    if action == nil then
+        return nil, "UNKNOWN_ACTION"
+    end
+
+    return action, nil
+end
+
+function lib:IterateActions(providerID)
+    if not isValidProviderID(providerID) or providers[providerID] == nil then
+        return emptyIterator
+    end
+
+    local order = actionOrder[providerID]
+    local providerActions = actions[providerID]
+    local index = 0
+
+    return function()
+        index = index + 1
+
+        local actionID = order[index]
+
+        if actionID == nil then
+            return nil
+        end
+
+        return actionID, providerActions[actionID]
+    end
+end
+
+function lib:ExecuteAction(providerID, actionID)
+    if not isValidProviderID(providerID) then
+        return nil, "INVALID_PROVIDER_ID"
+    end
+
+    if providers[providerID] == nil then
+        return nil, "UNKNOWN_PROVIDER"
+    end
+
+    if not isValidActionID(actionID) then
+        return nil, "INVALID_ACTION_ID"
+    end
+
+    local action, _, handler = getActionRecord(providerID, actionID)
+
+    if action == nil then
+        return nil, "UNKNOWN_ACTION"
+    end
+
+    return callActionHandler(handler, nil)
+end
+
+function providerMethods:RegisterSettingSection(sectionID, info)
+    local providerID = getProviderID(self)
+
+    if providerID == nil then
+        return nil, "UNKNOWN_PROVIDER"
+    end
+
+    if not isValidSettingSectionID(sectionID) then
+        return nil, "INVALID_SETTING_SECTION_ID"
+    end
+
+    local valid, validationError = validateSettingSectionInfo(info)
+
+    if not valid then
+        return nil, validationError
+    end
+
+    local providerSections = settingSections[providerID]
+    local section = providerSections[sectionID]
+
+    if section ~= nil then
+        if not isCompatibleSettingSectionInfo(
+            settingSectionInfo[providerID][sectionID],
+            info
+        ) then
+            return nil, "SETTING_SECTION_CONFLICT"
+        end
+
+        return section, nil
+    end
+
+    section = setmetatable({}, settingSectionMetatable)
+    providerSections[sectionID] = section
+    settingSectionInfo[providerID][sectionID] = cloneValue(info)
+    settingSectionOrder[providerID][#settingSectionOrder[providerID] + 1] = sectionID
+    settingSectionObjectInfo[section] = {
+        providerID = providerID,
+        sectionID = sectionID,
+    }
+
+    fireEvent(
+        lib.EVENT_SETTING_SECTION_REGISTERED,
+        providerID,
+        sectionID,
+        section
+    )
+
+    return section, nil
+end
+
+function lib:GetSettingSection(providerID, sectionID)
+    if not isValidProviderID(providerID) then
+        return nil, "INVALID_PROVIDER_ID"
+    end
+
+    if providers[providerID] == nil then
+        return nil, "UNKNOWN_PROVIDER"
+    end
+
+    if not isValidSettingSectionID(sectionID) then
+        return nil, "INVALID_SETTING_SECTION_ID"
+    end
+
+    local section = settingSections[providerID][sectionID]
+
+    if section == nil then
+        return nil, "UNKNOWN_SETTING_SECTION"
+    end
+
+    return section, nil
+end
+
+function lib:IterateSettingSections(providerID)
+    if not isValidProviderID(providerID) or providers[providerID] == nil then
+        return emptyIterator
+    end
+
+    local order = settingSectionOrder[providerID]
+    local providerSections = settingSections[providerID]
+    local index = 0
+
+    return function()
+        index = index + 1
+
+        local sectionID = order[index]
+
+        if sectionID == nil then
+            return nil
+        end
+
+        return sectionID, providerSections[sectionID]
+    end
+end
+
+function providerMethods:RegisterSetting(settingID, info, handlers)
+    local providerID = getProviderID(self)
+
+    if providerID == nil then
+        return nil, "UNKNOWN_PROVIDER"
+    end
+
+    if not isValidSettingID(settingID) then
+        return nil, "INVALID_SETTING_ID"
+    end
+
+    local valid, validationError = validateSettingInfo(info)
+
+    if not valid then
+        return nil, validationError
+    end
+
+    valid, validationError = validateSettingHandlers(handlers)
+
+    if not valid then
+        return nil, validationError
+    end
+
+    if info.section ~= nil and settingSections[providerID][info.section] == nil then
+        return nil, "UNKNOWN_SETTING_SECTION"
+    end
+
+    local providerSettings = settings[providerID]
+    local setting = providerSettings[settingID]
+
+    if setting ~= nil then
+        if not isCompatibleSettingInfo(settingInfo[providerID][settingID], info) then
+            return nil, "SETTING_CONFLICT"
+        end
+
+        return setting, nil
+    end
+
+    setting = setmetatable({}, settingMetatable)
+    providerSettings[settingID] = setting
+    settingInfo[providerID][settingID] = cloneValue(info)
+    settingOrder[providerID][#settingOrder[providerID] + 1] = settingID
+    settingHandlers[providerID][settingID] = handlers
+    settingObjectInfo[setting] = {
+        providerID = providerID,
+        settingID = settingID,
+    }
+
+    fireEvent(
+        lib.EVENT_SETTING_REGISTERED,
+        providerID,
+        settingID,
+        setting
+    )
+
+    return setting, nil
+end
+
+function lib:GetSetting(providerID, settingID)
+    if not isValidProviderID(providerID) then
+        return nil, "INVALID_PROVIDER_ID"
+    end
+
+    if providers[providerID] == nil then
+        return nil, "UNKNOWN_PROVIDER"
+    end
+
+    if not isValidSettingID(settingID) then
+        return nil, "INVALID_SETTING_ID"
+    end
+
+    local setting = settings[providerID][settingID]
+
+    if setting == nil then
+        return nil, "UNKNOWN_SETTING"
+    end
+
+    return setting, nil
+end
+
+function lib:IterateSettings(providerID)
+    if not isValidProviderID(providerID) or providers[providerID] == nil then
+        return emptyIterator
+    end
+
+    local order = settingOrder[providerID]
+    local providerSettings = settings[providerID]
+    local index = 0
+
+    return function()
+        index = index + 1
+
+        local settingID = order[index]
+
+        if settingID == nil then
+            return nil
+        end
+
+        return settingID, providerSettings[settingID]
+    end
+end
+
+function lib:GetSettingValue(providerID, settingID, entity)
+    if not isValidProviderID(providerID) then
+        return nil, "INVALID_PROVIDER_ID"
+    end
+
+    if providers[providerID] == nil then
+        return nil, "UNKNOWN_PROVIDER"
+    end
+
+    if not isValidSettingID(settingID) then
+        return nil, "INVALID_SETTING_ID"
+    end
+
+    local setting, info, handlers = getSettingRecord(providerID, settingID)
+
+    if setting == nil then
+        return nil, "UNKNOWN_SETTING"
+    end
+
+    local entitySnapshot, entityError = validateSettingEntity(info, entity)
+
+    if entityError ~= nil then
+        return nil, entityError
+    end
+
+    return callSettingGetter(
+        providerID,
+        settingID,
+        info,
+        handlers,
+        entitySnapshot
+    )
+end
+
+function lib:SetSettingValue(providerID, settingID, value, entity)
+    if not isValidProviderID(providerID) then
+        return nil, "INVALID_PROVIDER_ID"
+    end
+
+    if providers[providerID] == nil then
+        return nil, "UNKNOWN_PROVIDER"
+    end
+
+    if not isValidSettingID(settingID) then
+        return nil, "INVALID_SETTING_ID"
+    end
+
+    local setting, info, handlers = getSettingRecord(providerID, settingID)
+
+    if setting == nil then
+        return nil, "UNKNOWN_SETTING"
+    end
+
+    if not validateSettingValue(info, value) then
+        return nil, "INVALID_SETTING_VALUE"
+    end
+
+    local entitySnapshot, entityError = validateSettingEntity(info, entity)
+
+    if entityError ~= nil then
+        return nil, entityError
+    end
+
+    local oldValue, readError = callSettingGetter(
+        providerID,
+        settingID,
+        info,
+        handlers,
+        entitySnapshot
+    )
+
+    if readError ~= nil then
+        return nil, readError
+    end
+
+    if deepEqual(oldValue, value) then
+        return false, nil
+    end
+
+    local written, writeError = callSettingSetter(
+        handlers,
+        value,
+        entitySnapshot
+    )
+
+    if not written then
+        return nil, writeError
+    end
+
+    local newValue, newReadError = callSettingGetter(
+        providerID,
+        settingID,
+        info,
+        handlers,
+        entitySnapshot
+    )
+
+    if newReadError ~= nil then
+        return nil, newReadError
+    end
+
+    if deepEqual(oldValue, newValue) then
+        return false, nil
+    end
+
+    fireEvent(lib.EVENT_SETTINGS_CHANGED, providerID, {
+        {
+            settingID = settingID,
+            value = newValue,
+            entity = entitySnapshot and cloneValue(entitySnapshot) or nil,
+        },
+    })
+
+    return true, nil
+end
+
+function providerMethods:NotifySettingChanged(settingID, entity)
+    local providerID = getProviderID(self)
+
+    if providerID == nil then
+        return nil, "UNKNOWN_PROVIDER"
+    end
+
+    if not isValidSettingID(settingID) then
+        return nil, "INVALID_SETTING_ID"
+    end
+
+    local setting, info, handlers = getSettingRecord(providerID, settingID)
+
+    if setting == nil then
+        return nil, "UNKNOWN_SETTING"
+    end
+
+    local entitySnapshot, entityError = validateSettingEntity(info, entity)
+
+    if entityError ~= nil then
+        return nil, entityError
+    end
+
+    local value, readError = callSettingGetter(
+        providerID,
+        settingID,
+        info,
+        handlers,
+        entitySnapshot
+    )
+
+    if readError ~= nil then
+        return nil, readError
+    end
+
+    fireEvent(lib.EVENT_SETTINGS_CHANGED, providerID, {
+        {
+            settingID = settingID,
+            value = value,
+            entity = entitySnapshot and cloneValue(entitySnapshot) or nil,
+        },
+    })
+
+    return true, nil
+end
+
+function providerMethods:RegisterField(fieldID, info, handlers)
     local providerID = getProviderID(self)
 
     if providerID == nil then
@@ -1123,6 +2525,20 @@ function providerMethods:RegisterField(fieldID, info)
 
     if not valid then
         return nil, validationError
+    end
+
+    valid, validationError = validateFieldHandlers(handlers)
+
+    if not valid then
+        return nil, validationError
+    end
+
+    if info.interactions ~= nil then
+        for _, actionID in pairs(info.interactions) do
+            if actions[providerID][actionID] == nil then
+                return nil, "UNKNOWN_ACTION"
+            end
+        end
     end
 
     local providerFields = fields[providerID]
@@ -1145,6 +2561,7 @@ function providerMethods:RegisterField(fieldID, info)
     providerFields[fieldID] = field
     providerFieldInfo[fieldID] = cloneValue(info)
     providerFieldOrder[#providerFieldOrder + 1] = fieldID
+    fieldHandlers[providerID][fieldID] = handlers or {}
     fieldObjectInfo[field] = {
         providerID = providerID,
         fieldID = fieldID,
@@ -1208,6 +2625,128 @@ function lib:IterateFields(providerID)
 
         return fieldID, providerFields[fieldID]
     end
+end
+
+function lib:GetFieldIcon(providerID, fieldID)
+    if not isValidProviderID(providerID) then
+        return nil, "INVALID_PROVIDER_ID"
+    end
+
+    if providers[providerID] == nil then
+        return nil, "UNKNOWN_PROVIDER"
+    end
+
+    if not isValidFieldID(fieldID) then
+        return nil, "INVALID_FIELD_ID"
+    end
+
+    local field, info = getFieldRecord(providerID, fieldID)
+
+    if field == nil then
+        return nil, "UNKNOWN_FIELD"
+    end
+
+    local handlers = fieldHandlers[providerID][fieldID]
+
+    if type(handlers) == "table" and type(handlers.getIcon) == "function" then
+        local ok, dynamicIcon = pcall(handlers.getIcon)
+
+        if not ok then
+            return nil, "PROVIDER_ERROR"
+        end
+
+        if dynamicIcon ~= nil then
+            if not validateIcon(dynamicIcon) then
+                return nil, "INVALID_ICON"
+            end
+
+            return dynamicIcon, nil
+        end
+    end
+
+    return info.icon, nil
+end
+
+function providerMethods:NotifyFieldIconChanged(fieldID)
+    local providerID = getProviderID(self)
+
+    if providerID == nil then
+        return nil, "UNKNOWN_PROVIDER"
+    end
+
+    if not isValidFieldID(fieldID) then
+        return nil, "INVALID_FIELD_ID"
+    end
+
+    if fields[providerID][fieldID] == nil then
+        return nil, "UNKNOWN_FIELD"
+    end
+
+    fireEvent(lib.EVENT_FIELD_ICON_CHANGED, providerID, fieldID)
+
+    return true, nil
+end
+
+function lib:ExecuteFieldInteraction(
+    providerID,
+    fieldID,
+    interaction,
+    entity
+)
+    if not isValidProviderID(providerID) then
+        return nil, "INVALID_PROVIDER_ID"
+    end
+
+    if providers[providerID] == nil then
+        return nil, "UNKNOWN_PROVIDER"
+    end
+
+    if not isValidFieldID(fieldID) then
+        return nil, "INVALID_FIELD_ID"
+    end
+
+    if interaction ~= "primary" and interaction ~= "secondary" then
+        return nil, "INVALID_INTERACTION"
+    end
+
+    local field, info = getFieldRecord(providerID, fieldID)
+
+    if field == nil then
+        return nil, "UNKNOWN_FIELD"
+    end
+
+    local actionID = info.interactions and info.interactions[interaction] or nil
+
+    if actionID == nil then
+        return nil, "INTERACTION_NOT_AVAILABLE"
+    end
+
+    local entitySnapshot = nil
+
+    if entity ~= nil then
+        if info.scope == "single" then
+            return nil, "ENTITY_NOT_ALLOWED"
+        end
+
+        local entityError
+        entitySnapshot, entityError = validateEntity(entity, info.entityType)
+
+        if entitySnapshot == nil then
+            return nil, entityError
+        end
+    end
+
+    local action, _, handler = getActionRecord(providerID, actionID)
+
+    if action == nil then
+        return nil, "UNKNOWN_ACTION"
+    end
+
+    return callActionHandler(handler, {
+        fieldID = fieldID,
+        interaction = interaction,
+        entity = entitySnapshot,
+    })
 end
 
 function providerMethods:SetValue(fieldID, value, entity)

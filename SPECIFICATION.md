@@ -1,6 +1,6 @@
 # LibSemanticData-1.0 Specification
 
-**Status:** Draft 0.9 – implementation candidate
+**Status:** Draft 1.0 – MINOR 7 implementation candidate
 **Library ID:** `LibSemanticData-1.0`
 **Repository:** `LibSemanticData`
 
@@ -10,7 +10,7 @@ LibSemanticData is a dependency-free data library for World of Warcraft addons.
 
 It allows producer addons to publish structured, individually addressable semantic values that consumer addons can discover and use independently of presentation.
 
-LibSemanticData provides data only.
+LibSemanticData provides semantic runtime data and Provider-owned capability descriptions. It does not provide presentation.
 
 It does not define:
 
@@ -19,7 +19,7 @@ It does not define:
 - lines
 - alignment
 - colors
-- icons or icon placement
+- icon placement or sizing
 - formatting
 - tooltips
 - persistence
@@ -45,10 +45,50 @@ LibSemanticData-1.0:
 - supports multiple embedded copies safely
 - keeps data identity separate from display labels
 - keeps Field identity separate from Entity identity
+- standardizes localized metadata without selecting a locale for Consumers
+- allows Providers to describe Provider-owned settings without storing their values
+- allows Providers to expose executable Actions without defining concrete input devices
 - exposes semantic source data rather than presentation-oriented strings
 - remains independent of any specific consumer such as Broker Panels
 
 LibSemanticData may coexist with LibDataBroker. An addon may publish classic LibDataBroker objects and LibSemanticData values at the same time.
+
+### 2.1 LocalizedText
+
+Static user-facing metadata uses the standardized `LocalizedText` shape:
+
+```lua
+{
+    enUS = "Display mode",
+    deDE = "Anzeigemodus",
+    frFR = "Mode d'affichage",
+}
+```
+
+Normative rules:
+
+- `LocalizedText` is always a table; a plain string is not a valid shorthand.
+- `enUS` is required and must contain a non-empty string.
+- additional locale entries are optional and must use four-character WoW-style locale identifiers such as `deDE`, `frFR`, `itIT`, `ptBR`, `esES`, or `esMX`
+- an omitted locale is not an error
+- the only fallback is the requested locale to `enUS`
+- there is no language-family fallback such as `esMX` to `esES`
+- there is no fallback through `deDE` or any other intermediate locale
+- LibSemanticData never calls `GetLocale()` to choose a language for a Consumer
+- the Consumer explicitly supplies the locale it wants resolved
+
+Resolution uses:
+
+```lua
+LSD:ResolveLocalizedText(localizedText, locale)
+→ text, resolvedLocale, err
+```
+
+If `frFR` is requested but not present, the result is the `enUS` text and `resolvedLocale = "enUS"`.
+
+`LocalizedText` is used by standardized static metadata including Provider labels/descriptions, Field labels/descriptions/category labels, Setting Section labels/descriptions/help, Setting labels/descriptions/help, enum-choice labels/descriptions, and Action labels/descriptions/help.
+
+Technical IDs and stored semantic values are never localized. Examples include Provider IDs, Field IDs, Setting IDs, Action IDs, section IDs, `category`, `entityType`, `entityID`, `origin`, enum `value` identifiers, Field Values, and Setting Values.
 
 ## 3. No display semantics
 
@@ -91,10 +131,15 @@ The core hierarchy is:
 
 ```text
 Provider
-└── Field
-    └── Value(s)
-        └── optional Entity
+├── Field
+│   └── Value(s)
+│       └── optional Entity
+├── Setting Section(s)
+├── Setting(s)
+└── Action(s)
 ```
+
+Fields may reference Provider Actions through abstract `primary` and `secondary` interactions. Provider Settings describe Provider-owned behavior. Consumer/display configuration remains outside LibSemanticData.
 
 Example:
 
@@ -121,7 +166,7 @@ The public library ID is:
 _G["LibSemanticData-1.0"]
 ```
 
-The major API identity remains `LibSemanticData-1.0` while changes stay backward-compatible.
+The major API identity remains `LibSemanticData-1.0` for compatible revisions at or after the current MINOR-7 pre-release baseline.
 
 Internal implementation revisions use a numeric `MINOR` value:
 
@@ -130,15 +175,17 @@ lib.MAJOR = "LibSemanticData-1.0"
 lib.MINOR = 1
 ```
 
-The first complete core implementation described by this draft uses:
+The implementation described by this draft uses:
 
 ```lua
-lib.MINOR = 6
+lib.MINOR = 7
 ```
+
+MINOR 7 is the new pre-release baseline for the `LibSemanticData-1.0` contract. Earlier draft MINOR revisions are not compatibility targets because no released Producer/Consumer ecosystem depends on them.
 
 `MINOR` is an implementation revision, not part of the public API identity.
 
-A newer embedded implementation must upgrade the existing global library table in place so that existing providers, fields, values, callbacks, and registration order are preserved.
+A newer compatible embedded implementation must upgrade the existing global library table in place so that registered Providers, Fields, Setting Sections, Settings, Actions, Field Values, callbacks, handlers, and registration order are preserved.
 
 A future incompatible API may use a separate global identity such as:
 
@@ -155,7 +202,7 @@ Example:
 
 ```lua
 local provider = LSD:RegisterProvider("MyAccountant", {
-    label = "MyAccountant",
+    label = { enUS = "MyAccountant" },
 })
 ```
 
@@ -195,6 +242,7 @@ Supported Provider metadata for 1.0:
 | `label` | yes | localized display name |
 | `description` | no | localized description |
 | `addon` | no | technical addon name |
+| `icon` | no | static WoW texture File ID or texture path |
 
 Unknown metadata keys must not cause registration to fail. Consumers may ignore metadata they do not understand.
 
@@ -222,6 +270,173 @@ A compatible duplicate registration returns the existing Provider object.
 
 An incompatible redefinition is a conflict.
 
+### 6.4 Provider Settings
+
+A Provider may optionally describe settings that change Provider-owned behavior or Provider-owned data production. LibSemanticData standardizes the schema and mediates access, but it does not store or persist the current Setting values.
+
+A Setting belongs in LibSemanticData when changing it changes how the Provider itself behaves or which/effective data it produces. A choice that only affects one Consumer's layout, selected Field, icon/text mode, font size, panel position, grid cell, or other presentation remains Consumer configuration and must not be registered as a Provider Setting.
+
+The initial Setting types are semantic rather than UI-control names:
+
+| Type | Value | Meaning |
+| --- | --- | --- |
+| `boolean` | boolean | true/false option |
+| `enum` | string | one technical value from a defined choice list |
+| `number` | finite number | numeric option, optionally constrained by `min`/`max` |
+| `string` | string | free text option |
+
+Names such as `select`, `dropdown`, `range`, `slider`, or `checkbox` are intentionally not Setting types because they prescribe UI. A Consumer decides which control is appropriate.
+
+#### 6.4.1 Setting Sections
+
+Settings may optionally reference a Provider-owned section by stable technical `section` ID. The section must be registered before a Setting references it.
+
+Example:
+
+```lua
+provider:RegisterSettingSection("display", {
+    label = {
+        enUS = "Display",
+        deDE = "Anzeige",
+    },
+})
+```
+
+Supported standardized section metadata:
+
+| Key | Required | Meaning |
+| --- | --- | --- |
+| `label` | yes | `LocalizedText` section name |
+| `description` | no | `LocalizedText` description |
+| `help` | no | `LocalizedText` additional help |
+
+Sections only organize Setting metadata. They do not prescribe tabs, headers, frames, or other UI.
+
+#### 6.4.2 Setting definition
+
+Example enum Setting:
+
+```lua
+provider:RegisterSetting("displayMode", {
+    section = "display",
+    type = "enum",
+    scope = "single",
+    label = {
+        enUS = "Display mode",
+        deDE = "Anzeigemodus",
+    },
+    default = "freeTotal",
+    choices = {
+        {
+            value = "free",
+            label = { enUS = "Free", deDE = "Frei" },
+        },
+        {
+            value = "used",
+            label = { enUS = "Used", deDE = "Belegt" },
+        },
+        {
+            value = "freeTotal",
+            label = { enUS = "Free / total", deDE = "Frei / Gesamt" },
+        },
+    },
+}, {
+    get = function(entity)
+        return providerOwnedState.displayMode
+    end,
+    set = function(value, entity)
+        providerOwnedState.displayMode = value
+    end,
+})
+```
+
+Supported standardized Setting metadata:
+
+| Key | Required | Meaning |
+| --- | --- | --- |
+| `label` | yes | `LocalizedText` Setting name |
+| `description` | no | `LocalizedText` description |
+| `help` | no | `LocalizedText` additional help |
+| `type` | yes | `boolean`, `enum`, `number`, or `string` |
+| `scope` | yes | `single` or `entity` |
+| `entityType` | for `entity` | expected Entity type |
+| `section` | no | registered technical Setting Section ID |
+| `default` | yes | valid default value; metadata only |
+| `choices` | for `enum` | non-empty ordered choice array |
+| `min` | `number` only, optional | minimum accepted value |
+| `max` | `number` only, optional | maximum accepted value |
+| `step` | `number` only, optional | positive recommended increment |
+
+For `enum`, every choice has a stable non-empty technical string `value`, a required localized `label`, and an optional localized `description`. Choice values are never localized.
+
+`default` describes the Provider's intended default but is not automatically written or persisted by LibSemanticData. The Provider remains the source of truth.
+
+#### 6.4.3 Setting scope and ownership
+
+Setting scopes reuse the existing semantic scope terms:
+
+```text
+single
+entity
+```
+
+A `single` Setting has one Provider-owned current value. An `entity` Setting requires `entityType` and is read or written for a matching Entity. Storage concepts such as account, profile, SavedVariables, per-character database, or Consumer profile are not LibSemanticData scopes.
+
+The registered `get` and `set` handlers are Provider behavior, not public metadata. Consumers receive Setting metadata through read-only Setting objects and access current state only through LibSemanticData.
+
+Consumer access:
+
+```lua
+LSD:GetSettingValue(providerID, settingID, entity)
+LSD:SetSettingValue(providerID, settingID, value, entity)
+```
+
+For `single`, `entity` is omitted. For `entity`, a normal LibSemanticData Entity table is required.
+
+A successful `SetSettingValue()` invokes the Provider's setter, reads back the effective Provider value, and emits `EVENT_SETTINGS_CHANGED` only when the effective value changed. This allows a Provider to normalize a requested value.
+
+When Provider-owned state changes outside `SetSettingValue()`, the Provider calls:
+
+```lua
+provider:NotifySettingChanged(settingID, entity)
+```
+
+LibSemanticData reads the current value through the Provider getter and emits the same change event. The library does not maintain a shadow Setting-value store.
+
+### 6.5 Provider Actions
+
+A Provider may register executable semantic Actions. Actions describe capabilities such as opening a Provider-owned window or toggling bags; they do not name mouse buttons or prescribe a Consumer UI.
+
+Example:
+
+```lua
+provider:RegisterAction("toggleBags", {
+    label = {
+        enUS = "Open/close bags",
+        deDE = "Taschen öffnen/schließen",
+    },
+}, function(context)
+    -- Provider-owned behavior
+end)
+```
+
+Supported standardized Action metadata:
+
+| Key | Required | Meaning |
+| --- | --- | --- |
+| `label` | yes | `LocalizedText` Action name |
+| `description` | no | `LocalizedText` description |
+| `help` | no | `LocalizedText` additional help |
+
+The executable handler remains private Provider behavior. Consumers discover the read-only Action description and invoke it through LibSemanticData.
+
+Direct invocation is:
+
+```lua
+LSD:ExecuteAction(providerID, actionID)
+```
+
+Field-bound invocation is described under Field interactions.
 
 ## 7. Field
 
@@ -231,7 +446,7 @@ Example:
 
 ```lua
 provider:RegisterField("characterGold", {
-    label = "Character Gold",
+    label = { enUS = "Character Gold" },
     type = "money",
     scope = "entity",
     entityType = "character",
@@ -257,6 +472,8 @@ Supported Field metadata for 1.0:
 | `category` | no | stable technical group ID |
 | `categoryLabel` | no | localized group label |
 | `origin` | no | structured technical origin reference |
+| `icon` | no | static/default WoW texture File ID or texture path |
+| `interactions` | no | abstract `primary`/`secondary` references to Provider Actions |
 
 Unknown metadata keys must be tolerated.
 
@@ -275,7 +492,7 @@ For a single-value Field:
 
 ```lua
 provider:RegisterField("realmGold", {
-    label = "Realm Gold",
+    label = { enUS = "Realm Gold" },
     type = "money",
     scope = "single",
 })
@@ -292,7 +509,7 @@ For an Entity-scoped Field:
 
 ```lua
 provider:RegisterField("characterGold", {
-    label = "Character Gold",
+    label = { enUS = "Character Gold" },
     type = "money",
     scope = "entity",
     entityType = "character",
@@ -409,6 +626,73 @@ nil, FIELD_CONFLICT
 ```
 
 The Producer-supplied origin table is copied at registration. Mutating that input table later must not modify registered metadata. A table returned through `field.origin` is likewise a snapshot; mutating it must not modify the registered origin.
+
+### 7.5 Field icons
+
+A Field may provide a semantic icon identifier. `icon` is optional immutable Field metadata and may be either:
+
+- a positive integral WoW texture File ID, preferred when available
+- a non-empty texture path string
+
+The icon identifies the Field or represented game object. LibSemanticData does not define whether a Consumer shows it, where it appears, or its size.
+
+For a dynamic icon, the Provider supplies an optional private `getIcon` Field handler at registration:
+
+```lua
+provider:RegisterField("bag1", info, {
+    getIcon = function()
+        return currentEquippedBagTexture
+    end,
+})
+```
+
+Consumers always use:
+
+```lua
+LSD:GetFieldIcon(providerID, fieldID)
+```
+
+If the dynamic resolver returns an icon, that value is used. If it returns `nil`, LibSemanticData falls back to the static/default `field.icon`. If neither exists, no icon is available.
+
+When a dynamic icon changes independently of a Field Value, the Provider calls:
+
+```lua
+provider:NotifyFieldIconChanged(fieldID)
+```
+
+which emits `EVENT_FIELD_ICON_CHANGED`. Dynamic icons are Field-level in MINOR 7; Entity-specific dynamic icons are not part of this baseline.
+
+### 7.6 Field interactions
+
+A Field may reference registered Provider Actions through abstract interaction roles:
+
+```lua
+interactions = {
+    primary = "toggleBags",
+    secondary = "toggleBags",
+}
+```
+
+The initial roles are exactly:
+
+```text
+primary
+secondary
+```
+
+The referenced Action must already be registered under the same Provider when the Field is registered. Both roles may reference the same Action.
+
+LibSemanticData does not define `LeftButton`, `RightButton`, keyboard shortcuts, controllers, or other concrete input devices. A Consumer such as Broker Panels may map `primary` to left click and `secondary` to right click. Another Consumer may map them differently.
+
+Consumers invoke a Field interaction with:
+
+```lua
+LSD:ExecuteFieldInteraction(providerID, fieldID, "primary", entity)
+```
+
+The optional Entity is allowed for Entity-scoped Fields and is delivered to the Provider Action handler as part of the Action context. Supplying an Entity for a `single` Field is invalid.
+
+The Action handler receives a context snapshot containing `fieldID`, `interaction`, and optional `entity`. The handler does not receive a Consumer frame or concrete mouse-button identifier from LibSemanticData.
 
 ## 8. Entities
 
@@ -676,12 +960,17 @@ The Producer API for 1.0 includes:
 ```lua
 LSD:RegisterProvider(providerID, info)
 
-provider:RegisterField(fieldID, info)
+provider:RegisterAction(actionID, info, handler)
+provider:RegisterField(fieldID, info, handlers)
+provider:RegisterSettingSection(sectionID, info)
+provider:RegisterSetting(settingID, info, handlers)
 
 provider:SetValue(fieldID, value)
 provider:SetValue(fieldID, value, entity)
-
 provider:SetValues(values)
+
+provider:NotifyFieldIconChanged(fieldID)
+provider:NotifySettingChanged(settingID, entity)
 ```
 
 `RegisterProvider` returns a Provider object.
@@ -808,8 +1097,23 @@ LSD:RegisterProvider(providerID, info)
 ```
 
 ```lua
-provider:RegisterField(fieldID, info)
+provider:RegisterField(fieldID, info, handlers)
 → field, err
+```
+
+```lua
+provider:RegisterSettingSection(sectionID, info)
+→ section, err
+```
+
+```lua
+provider:RegisterSetting(settingID, info, handlers)
+→ setting, err
+```
+
+```lua
+provider:RegisterAction(actionID, info, handler)
+→ action, err
 ```
 
 On success:
@@ -877,6 +1181,36 @@ LSD:GetProvider(providerID)
 ```lua
 LSD:GetField(providerID, fieldID)
 → field, err
+```
+
+```lua
+LSD:GetSettingSection(providerID, sectionID)
+→ section, err
+
+LSD:GetSetting(providerID, settingID)
+→ setting, err
+
+LSD:GetAction(providerID, actionID)
+→ action, err
+```
+
+```lua
+LSD:GetFieldIcon(providerID, fieldID)
+→ icon, err
+```
+
+```lua
+LSD:GetSettingValue(providerID, settingID, entity)
+→ value, err
+
+LSD:SetSettingValue(providerID, settingID, value, entity)
+→ changed, err
+```
+
+```lua
+LSD:ExecuteAction(providerID, actionID)
+LSD:ExecuteFieldInteraction(providerID, fieldID, interaction, entity)
+→ executed, err
 ```
 
 For values:
@@ -970,6 +1304,20 @@ end
 ```
 
 ```lua
+for sectionID, section in LSD:IterateSettingSections(providerID) do
+    ...
+end
+
+for settingID, setting in LSD:IterateSettings(providerID) do
+    ...
+end
+
+for actionID, action in LSD:IterateActions(providerID) do
+    ...
+end
+```
+
+```lua
 for value, entity in LSD:IterateValues(providerID, fieldID) do
     ...
 end
@@ -1034,17 +1382,32 @@ nil, INVALID_CALLBACK_TOKEN
 The Consumer API for 1.0 includes:
 
 ```lua
+LSD:ResolveLocalizedText(localizedText, locale)
+
 LSD:GetProvider(providerID)
 LSD:GetField(providerID, fieldID)
+LSD:GetFieldIcon(providerID, fieldID)
 LSD:GetValue(providerID, fieldID)
 LSD:GetValue(providerID, fieldID, entityType, entityID)
 
+LSD:GetSettingSection(providerID, sectionID)
+LSD:GetSetting(providerID, settingID)
+LSD:GetSettingValue(providerID, settingID, entity)
+LSD:SetSettingValue(providerID, settingID, value, entity)
+
+LSD:GetAction(providerID, actionID)
+LSD:ExecuteAction(providerID, actionID)
+LSD:ExecuteFieldInteraction(providerID, fieldID, interaction, entity)
+
 LSD:IterateProviders()
 LSD:IterateFields(providerID)
+LSD:IterateSettingSections(providerID)
+LSD:IterateSettings(providerID)
+LSD:IterateActions(providerID)
 LSD:IterateValues(providerID, fieldID)
 ```
 
-Consumers must be able to discover Providers and Fields regardless of load order.
+Consumers must be able to discover Providers, Fields, Setting Sections, Settings, and Actions regardless of load order.
 
 ## 15. IterateValues
 
@@ -1099,6 +1462,12 @@ For Entity-scoped Fields:
 
 `IterateFields()` preserves Field registration order.
 
+`IterateSettingSections()` preserves Setting Section registration order.
+
+`IterateSettings()` preserves Setting registration order.
+
+`IterateActions()` preserves Action registration order.
+
 `IterateValues()` preserves current first-seen Entity order for Entity-scoped values.
 
 Removal deletes the Entity from that order. If the same Entity is published again later, it is appended to the end as newly seen.
@@ -1119,11 +1488,16 @@ LSD:UnregisterCallback(token)
 
 The returned token is opaque to consumers.
 
-Initial events:
+Events:
 
 ```lua
 LSD.EVENT_PROVIDER_REGISTERED
 LSD.EVENT_FIELD_REGISTERED
+LSD.EVENT_FIELD_ICON_CHANGED
+LSD.EVENT_SETTING_SECTION_REGISTERED
+LSD.EVENT_SETTING_REGISTERED
+LSD.EVENT_SETTINGS_CHANGED
+LSD.EVENT_ACTION_REGISTERED
 LSD.EVENT_VALUES_CHANGED
 ```
 
@@ -1139,7 +1513,53 @@ callback(providerID, provider)
 callback(providerID, fieldID, field)
 ```
 
-### 17.3 Values changed
+### 17.3 Field icon changed
+
+```lua
+callback(providerID, fieldID)
+```
+
+This event signals that a dynamic Field icon may have changed. Consumers re-read the effective icon with `GetFieldIcon()`.
+
+### 17.4 Setting Section registered
+
+```lua
+callback(providerID, sectionID, section)
+```
+
+### 17.5 Setting registered
+
+```lua
+callback(providerID, settingID, setting)
+```
+
+### 17.6 Settings changed
+
+```lua
+callback(providerID, changes)
+```
+
+Each change record contains:
+
+```lua
+{
+    settingID = "displayMode",
+    value = "freeTotal",
+    entity = nil,
+}
+```
+
+For an Entity-scoped Setting, `entity` is the Entity snapshot. The event intentionally reports the current effective value and does not guarantee an old value because Provider-owned state may change outside LibSemanticData.
+
+`SetSettingValue()` emits this event after a successful effective change. A Provider that changes its Setting state through another path calls `NotifySettingChanged()` to emit the same event shape.
+
+### 17.7 Action registered
+
+```lua
+callback(providerID, actionID, action)
+```
+
+### 17.8 Values changed
 
 The callback signature is:
 
@@ -1238,7 +1658,7 @@ changes = {
 }
 ```
 
-### 17.4 Entity change cases
+### 17.9 Entity change cases
 
 For an Entity-scoped value, the four relevant change shapes are:
 
@@ -1304,7 +1724,7 @@ newEntity = nil
 
 For `scope = "single"` Fields, both `oldEntity` and `newEntity` are always `nil`. Creation, update, and removal are represented only through `oldValue` and `newValue`.
 
-### 17.5 VALUES_CHANGED rules
+### 17.10 VALUES_CHANGED rules
 
 The following rules are normative:
 
@@ -1328,7 +1748,7 @@ The following rules are normative:
 
 Using `oldEntity` and `newEntity` rather than flattening Entity metadata keeps the callback format extensible if optional Entity metadata is added later.
 
-### 17.6 Entity snapshot semantics
+### 17.11 Entity snapshot semantics
 
 `oldEntity` and `newEntity` are logical read-only snapshots.
 
@@ -1383,7 +1803,7 @@ No fixed addon load order is part of the specification.
 
 ## 20. Duplicate registration
 
-Provider and Field registration is idempotent when repeated registration is compatible.
+Provider, Field, Setting Section, Setting, and Action registration is idempotent when repeated registration is compatible.
 
 Registering the same Provider ID again:
 
@@ -1392,7 +1812,7 @@ Registering the same Provider ID again:
 - does not duplicate the registration event
 - returns the existing Provider
 
-Registering the same Field ID again under the same Provider follows the same principle.
+Registering the same Field, Setting Section, Setting, or Action technical ID again under the same Provider follows the same principle. Registered behavior handlers are not exposed as metadata and are not replaced by a compatible duplicate registration.
 
 Optional metadata may be omitted in a duplicate registration.
 
@@ -1404,6 +1824,7 @@ Provider compatibility checks use the standardized Provider metadata:
 label
 description
 addon
+icon
 ```
 
 Field compatibility checks use the standardized semantic Field metadata:
@@ -1418,9 +1839,13 @@ unit
 category
 categoryLabel
 origin
+icon
+interactions
 ```
 
-Changing `type`, `scope`, or `entityType` is always incompatible.
+Changing a Field `type`, `scope`, or `entityType` is always incompatible. Setting compatibility includes its localized metadata, `type`, `scope`, `entityType`, `section`, `default`, choices, and numeric constraints. Action and Setting Section compatibility use their standardized localized metadata.
+
+An incompatible Setting Section registration returns `SETTING_SECTION_CONFLICT`; an incompatible Setting registration returns `SETTING_CONFLICT`; an incompatible Action registration returns `ACTION_CONFLICT`.
 
 An incompatible Provider registration returns:
 
@@ -1443,27 +1868,28 @@ Multiple addons may embed different implementation revisions of `LibSemanticData
 Example:
 
 ```text
-Addon A → MINOR 3
-Addon B → MINOR 5
-Addon C → MINOR 2
+Addon A → MINOR 7
+Addon B → MINOR 9
+Addon C → MINOR 8
 ```
 
 The first loaded revision initializes the shared global library table.
 
 When a newer MINOR revision loads, it upgrades the existing library in place.
 
-The following state must be preserved:
+For compatible revisions at or after the MINOR-7 pre-release baseline, the following state must be preserved:
 
 - Provider registry
 - Field registry
-- current values
+- Setting Section registry
+- Setting registry and Provider-owned handlers
+- Action registry and Provider-owned handlers
+- current Field values
 - Entity metadata
 - callbacks
-- Provider registration order
-- Field registration order
+- registration order for Providers, Fields, Setting Sections, Settings and Actions
 - current first-seen Entity order
-- existing Provider object identity
-- existing Field object identity
+- existing registered object identity
 - the existing global library table identity
 
 The global table:
@@ -1480,7 +1906,7 @@ The new `lib.MINOR` value is assigned only after the upgrade and any required mi
 
 If an equal or newer MINOR revision is already loaded, an older embedded copy performs no downgrade and leaves the current implementation untouched.
 
-All MINOR revisions within `LibSemanticData-1.0` must remain backward-compatible with the public 1.0 specification.
+MINOR 7 is the current pre-release baseline. Compatibility guarantees apply to subsequent compatible revisions after this baseline; earlier unpublished draft MINOR contracts are not retained as alternate public schemas.
 
 ## 22. Errors
 
@@ -1495,6 +1921,30 @@ UNKNOWN_PROVIDER
 INVALID_FIELD_ID
 UNKNOWN_FIELD
 INVALID_FIELD_TYPE
+INVALID_ICON
+INVALID_LOCALIZED_TEXT
+INVALID_LOCALE
+
+INVALID_SETTING_SECTION_ID
+UNKNOWN_SETTING_SECTION
+SETTING_SECTION_CONFLICT
+
+INVALID_SETTING_ID
+UNKNOWN_SETTING
+INVALID_SETTING_TYPE
+INVALID_SETTING_VALUE
+SETTING_CONFLICT
+SETTING_REJECTED
+
+INVALID_ACTION_ID
+UNKNOWN_ACTION
+ACTION_CONFLICT
+ACTION_REJECTED
+INVALID_INTERACTION
+INTERACTION_NOT_AVAILABLE
+
+INVALID_HANDLER
+PROVIDER_ERROR
 
 INVALID_VALUE
 
@@ -1665,11 +2115,11 @@ A `status` value such as `warning` does not imply a specific color.
 
 LibSemanticData stores no SavedVariables and has no persistence responsibility.
 
-A Producer owns its source data.
+A Producer owns its source data and the current values of its Provider Settings.
 
-A Consumer owns its configuration.
+A Consumer owns its own display/layout configuration and locale choice.
 
-LibSemanticData only exposes current runtime data.
+LibSemanticData only mediates current runtime data, Setting access, metadata, and Provider Actions; it does not persist them.
 
 ## 29. Relationship to other WoW libraries
 
@@ -1693,7 +2143,6 @@ The initial specification intentionally excludes:
 
 - UI widgets
 - tooltips
-- click actions
 - colors
 - panel layout
 - SavedVariables
@@ -1706,6 +2155,7 @@ The initial specification intentionally excludes:
 - consumer-specific formatting rules
 - current-character/current-realm/current-guild/current-pet semantics
 - display recommendations for specific consumers
+- concrete input-device mappings such as LeftButton/RightButton; Consumers map those to abstract interactions
 
 ## 31. Example: MyAccountant
 
@@ -1713,25 +2163,25 @@ The initial specification intentionally excludes:
 local LSD = _G["LibSemanticData-1.0"]
 
 local provider = LSD:RegisterProvider("MyAccountant", {
-    label = "MyAccountant",
+    label = { enUS = "MyAccountant" },
     addon = "MyAccountant",
 })
 
 provider:RegisterField("realmGold", {
-    label = "Realm Gold",
+    label = { enUS = "Realm Gold" },
     type = "money",
     scope = "single",
     category = "balance",
-    categoryLabel = "Balance",
+    categoryLabel = { enUS = "Balance" },
 })
 
 provider:RegisterField("characterGold", {
-    label = "Character Gold",
+    label = { enUS = "Character Gold" },
     type = "money",
     scope = "entity",
     entityType = "character",
     category = "balance",
-    categoryLabel = "Balance",
+    categoryLabel = { enUS = "Balance" },
 })
 
 provider:SetValue("realmGold", 14244856)
@@ -1769,19 +2219,17 @@ Only the runtime library directory needs to be embedded into normal addons.
 
 ## 33. 1.0 specification status
 
-Draft 0.9 is the implementation-candidate specification for `LibSemanticData-1.0`.
+Draft 1.0 is the MINOR-7 implementation-candidate specification for `LibSemanticData-1.0`.
 
 The current implementation revision is:
 
 ```text
-MINOR = 6
+MINOR = 7
 ```
 
-The MINOR-6 implementation extends standardized Field metadata with an optional immutable technical origin reference.
+MINOR 7 establishes the pre-release baseline with strict `LocalizedText`, Provider-owned Settings, Provider Actions and abstract Field interactions, static/default Field icons, dynamic Field icon resolvers, and the existing MINOR-6 `origin` metadata. Existing Field/Value semantics remain intact.
 
-Validation for earlier revisions covers Provider/Field discovery, typed Values, `single` and `entity` scopes, atomic batches, callbacks and events, snapshot semantics, ordering, typed Entity identity, strict 1.0 payload validation, MINOR upgrades, migration of existing Entity Values, and downgrade protection. MINOR 6 additionally standardizes immutable Field origin metadata while preserving existing MINOR-5 Producers that do not provide `origin`.
-
-No structural API mismatch is currently known from the implementation/specification audit.
+The implementation must be validated by the in-game test addon before the MINOR-7 test status is considered confirmed.
 
 The public 1.0 API remains pre-release until the first real Producer/Consumer integration has been completed and any findings from that integration have been resolved.
 

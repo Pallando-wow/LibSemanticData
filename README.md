@@ -1,89 +1,84 @@
 # LibSemanticData
 
-LibSemanticData is a small, dependency-free data library for World of Warcraft addons.
+LibSemanticData is a small, dependency-free semantic data and provider-capability library for World of Warcraft addons.
 
-Its purpose is to let addons publish structured, individually addressable data values that other addons can discover and consume independently of presentation.
-
-## Why?
-
-Classic broker systems are very good at exposing ready-to-display text, icons, and click actions.
-
-LibSemanticData focuses on the values behind that presentation.
-
-Instead of exposing only:
-
-```text
-1,424g 48s 56c
-```
-
-an addon can publish separate semantic values such as:
-
-```text
-realmGold
-characterGold
-income
-expenses
-profit
-```
-
-A consumer can then decide how those values should be displayed or combined.
-
-## Example
-
-A provider may register one `characterGold` field and publish multiple entity-scoped values:
-
-```text
-MyAccountant
-├── realmGold
-│   └── 1,424g total
-│
-└── characterGold
-    ├── Pitronas  → 563g
-    ├── Temlin    → 421g
-    └── Paljande  → 266g
-```
-
-The character identity is kept separate from the Field ID.
+It lets Producer addons publish structured, individually addressable values that Consumers can discover independently of presentation. Providers may also describe their own configurable behavior and executable actions without LibSemanticData creating UI or storing SavedVariables.
 
 ## Core principles
 
 - no LibStub dependency
 - no CallbackHandler dependency
 - no LibDataBroker dependency
-- no UI
-- no formatting
-- no SavedVariables
-- no persistent storage
-- stable technical Provider and Field IDs
-- optional Entity-scoped values
-- built-in registry
-- built-in change notifications
+- no UI or formatting layer
+- no SavedVariables or persistent storage
+- stable non-localized technical IDs
+- strict localized static metadata with required `enUS`
+- `single` and Entity-scoped Field values
+- Provider-owned Settings described through a neutral schema
+- Provider Actions with abstract `primary` / `secondary` Field interactions
+- static/default and dynamic Field icons
+- built-in registry and callbacks
 - safe use by multiple embedded addon copies
 
 ## Data model
 
 ```text
 Provider
-└── Field
-    └── Value(s)
-        └── optional Entity
+├── Fields
+│   ├── Values
+│   ├── optional icon
+│   └── optional interactions
+├── Setting Sections
+├── Settings
+└── Actions
 ```
 
-## Relationship to LibDataBroker
+LibSemanticData describes what a Provider offers. A Consumer decides how to display it.
 
-LibSemanticData does not replace LibDataBroker.
+## Localized metadata
 
-An addon may support both:
+Static user-facing metadata uses `LocalizedText`:
+
+```lua
+label = {
+    enUS = "Display mode",
+    deDE = "Anzeigemodus",
+}
+```
+
+`enUS` is required. Other locales are optional. Resolution is always:
 
 ```text
-LibDataBroker
-→ classic broker presentation
-
-LibSemanticData
-→ structured individual values
+requested locale → enUS
 ```
 
-Consumers such as [Broker Panels](https://github.com/Pallando-wow/BrokerPanels) may use both systems side by side.
+There is no additional fallback chain, and LibSemanticData does not call `GetLocale()` to choose a Consumer language.
+
+```lua
+local text, resolvedLocale, err = LSD:ResolveLocalizedText(label, "deDE")
+```
+
+Technical IDs and values are never localized.
+
+## Field values
+
+The initial Field types are:
+
+```text
+text
+number
+integer
+percent
+money
+duration
+boolean
+status
+progress
+```
+
+`money` is an integer copper total, matching normal WoW money APIs. Formatting Gold/Silver/Copper remains Consumer logic.
+
+A `progress` value contains `current`, `maximum`, and optional `minimum`.
 
 ## Quick start
 
@@ -91,13 +86,19 @@ Consumers such as [Broker Panels](https://github.com/Pallando-wow/BrokerPanels) 
 local LSD = _G["LibSemanticData-1.0"]
 
 local provider, err = LSD:RegisterProvider("ExampleAddon", {
-    label = "Example Addon",
+    label = {
+        enUS = "Example Addon",
+        deDE = "Beispiel-Addon",
+    },
     addon = "ExampleAddon",
 })
 
 local field
 field, err = provider:RegisterField("characterGold", {
-    label = "Character Gold",
+    label = {
+        enUS = "Character Gold",
+        deDE = "Charaktergold",
+    },
     type = "money",
     scope = "entity",
     entityType = "character",
@@ -110,47 +111,146 @@ provider:SetValue("characterGold", 5639221, {
 })
 ```
 
-A Consumer can discover the Field and its metadata without knowing the Producer in advance:
+A Consumer can discover Providers and Fields without knowing the Producer in advance:
 
 ```lua
 for providerID, currentProvider in LSD:IterateProviders() do
     for fieldID, currentField in LSD:IterateFields(providerID) do
-        print(
-            providerID,
-            fieldID,
-            currentField.type,
-            currentField.scope,
-            currentField.entityType
-        )
+        print(providerID, fieldID, currentField.type, currentField.scope)
     end
 end
 ```
 
-Registered Provider and Field metadata is exposed through the returned objects as read-only information.
+## Provider Settings
+
+Settings describe Provider-owned behavior. They are not Consumer/display settings.
+
+For example, a Bags Provider may expose an enum describing whether it produces a free, used, free/total, used/total, or percentage display value. Broker Panels does not need Bags-specific code; it only understands the generic Setting schema.
+
+```lua
+provider:RegisterSettingSection("display", {
+    label = {
+        enUS = "Display",
+        deDE = "Anzeige",
+    },
+})
+
+provider:RegisterSetting("displayMode", {
+    section = "display",
+    type = "enum",
+    scope = "single",
+    label = {
+        enUS = "Display mode",
+        deDE = "Anzeigemodus",
+    },
+    default = "freeTotal",
+    choices = {
+        {
+            value = "free",
+            label = { enUS = "Free", deDE = "Frei" },
+        },
+        {
+            value = "used",
+            label = { enUS = "Used", deDE = "Belegt" },
+        },
+        {
+            value = "freeTotal",
+            label = { enUS = "Free / total", deDE = "Frei / Gesamt" },
+        },
+    },
+}, {
+    get = function()
+        return providerOwnedSettings.displayMode
+    end,
+    set = function(value)
+        providerOwnedSettings.displayMode = value
+    end,
+})
+```
+
+LibSemanticData never stores the current Setting value. `get` and `set` remain Provider-owned handlers.
+
+Consumers use:
+
+```lua
+LSD:GetSettingValue(providerID, settingID, entity)
+LSD:SetSettingValue(providerID, settingID, value, entity)
+```
+
+## Actions and Field interactions
+
+A Provider can expose behavior without naming concrete mouse buttons:
+
+```lua
+provider:RegisterAction("toggleBags", {
+    label = {
+        enUS = "Open/close bags",
+        deDE = "Taschen öffnen/schließen",
+    },
+}, function(context)
+    -- Provider behavior
+end)
+```
+
+A Field can bind that Action to abstract interactions:
+
+```lua
+interactions = {
+    primary = "toggleBags",
+    secondary = "toggleBags",
+}
+```
+
+A Consumer such as Broker Panels may map `primary` to left click and `secondary` to right click. LibSemanticData itself does not define that mapping.
+
+## Field icons
+
+A Field may declare a static/default icon using a positive WoW texture File ID or a texture path:
+
+```lua
+icon = 133633
+```
+
+A Producer may also provide a dynamic icon resolver:
+
+```lua
+provider:RegisterField("bag1", info, {
+    getIcon = function()
+        return currentBagTexture
+    end,
+})
+```
+
+Consumers query the effective icon with:
+
+```lua
+LSD:GetFieldIcon(providerID, fieldID)
+```
+
+The Consumer decides whether to display the icon and how large or where it should be.
+
+## Relationship to LibDataBroker
+
+LibSemanticData does not replace LibDataBroker. An addon may publish both at the same time.
+
+LibDataBroker can continue to expose classic ready-to-display broker behavior, while LibSemanticData exposes structured Fields, Provider Settings, semantic Actions, and metadata for Consumers that want deeper integration.
 
 ## Specification
 
-See `SPECIFICATION.md`.
+See `SPECIFICATION.md` for the normative API contract.
 
 ## Status
 
-The first complete `LibSemanticData-1.0` core implementation is available as implementation revision `MINOR = 6`.
+The current implementation candidate is:
 
-The current implementation covers:
+```text
+LibSemanticData-1.0
+MINOR = 7
+```
 
-- Provider and Field registration and discovery
-- optional standardized Field origin metadata
-- `single` and `entity` Field scopes
-- typed Values
-- Entity-scoped Values
-- atomic `SetValues()` updates
-- callbacks and change events
-- snapshot semantics
-- compatible embedded-library upgrades and downgrade protection
+MINOR 7 is the new pre-release baseline. It adds strict `LocalizedText`, Provider Settings, Provider Actions and abstract Field interactions, and static/dynamic Field icons while retaining the existing Provider → Field → Value model, Entity scopes, typed values, atomic updates, callbacks, snapshots, and `field.origin` provenance metadata.
 
-The current core has been validated with automated in-game tests.
-
-The implementation/specification audit is complete. The API remains a pre-release candidate until the first real Producer/Consumer integration is complete.
+The runtime implementation has passed syntax and local smoke tests. Full in-game Test Addon validation is still required before the MINOR-7 test status is confirmed.
 
 ## License
 
