@@ -1,0 +1,113 @@
+name: Bug Report
+description: Report a reproducible problem with LibSemanticData.
+title: "[Bug] "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a problem with LibSemanticData.
+
+        Please provide enough information to reproduce the issue.
+
+  - type: checkboxes
+    id: existing-issue
+    attributes:
+      label: Existing issue
+      description: Please check whether this problem has already been reported.
+      options:
+        - label: I have searched the existing issues and did not find a matching report.
+          required: true
+
+  - type: input
+    id: lib-version
+    attributes:
+      label: LibSemanticData version
+      description: Enter the LibSemanticData MINOR version you are using.
+      placeholder: "Example: MINOR 7"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: wow-client
+    attributes:
+      label: World of Warcraft client
+      description: Select the client where the problem occurs.
+      options:
+        - Retail
+        - WoW Forever
+        - Mists of Pandaria Classic
+        - Cataclysm Classic
+        - Classic Era
+        - Hardcore
+        - Season of Discovery
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: wow-version
+    attributes:
+      label: WoW client version
+      description: Enter the game version or Interface version if known.
+      placeholder: "Example: 12.0.0 / Interface 120000"
+    validations:
+      required: false
+
+  - type: input
+    id: addon
+    attributes:
+      label: Addon using LibSemanticData
+      description: Which addon or test environment is using the library?
+      placeholder: "Example: Broker Panels 1.0.0"
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened?
+      description: Describe the problem as clearly as possible.
+      placeholder: Describe what happened.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What did you expect to happen instead?
+      placeholder: Describe the expected behavior.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: List the steps needed to reproduce the problem.
+      placeholder: |
+        1. Load ...
+        2. Register ...
+        3. Call ...
+        4. Observe ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: error
+    attributes:
+      label: Error message or stack trace
+      description: Paste the complete Lua error or stack trace here, if available.
+      render: text
+    validations:
+      required: false
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional information
+      description: Add any other relevant details, screenshots, logs, or examples.
+    validations:
+      required: false
